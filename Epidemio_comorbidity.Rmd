@@ -1,0 +1,1191 @@
+---
+title: "Comorbidity of psychiatric disorder in Syrian refugee children living in ITS"
+author: "Claudinei Biazoli"
+date: "8/13/2021"
+output: html_document
+---
+
+The complete set of analysis evaluating comorbidity of common mental health disorders (Depression, Anxiety, PTSD and OC/ODD) in Syrian refugee children living in ITS in Lebanon are presented. The main results are presented in the manuscript titled: "... "
+
+The full BIOPATH dataset stored in a SPSS .sav file was upload to R. The address of the file locally renamed as "BIOPATHEpidemio.sav" is: https://qmulprod-my.sharepoint.com/personal/btw735_qmul_ac_uk/Documents/OneDrive/BIOPATH/BIOPATH%20Data%20Analysis/Working%20datasets%20and%20analysis/Fiona%20McEwen_Epidemiology%20paper/Dataset/BIOPATH_Y1_and_Y2_Merged_v1.1_190720_CORRECTIONS_v1.25_MINIKID_29-11-2021.sav)
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+The "ggven" function was adapted from the ggven R package to construct and plot Venn diagrams and show the prevalence (total sample as denominator) of each overlapping condition. Odds-ratio with confidence intervals were calculated using the epitools R package.
+
+`````{r function, include=FALSE}
+ggvenn <- function(data,  columns = NULL,
+                   show_elements = FALSE,
+                   show_percentage = TRUE,
+                   digits = 1,
+                   denominator=10,
+                   fill_color = c("blue", "yellow", "green", "red"),
+                   fill_alpha = .5,
+                   stroke_color = "black",
+                   stroke_alpha = 1,
+                   stroke_size = 1,
+                   stroke_linetype = "solid",
+                   set_name_color = "black",
+                   set_name_size = 6,
+                   text_color = "black",
+                   text_size = 4,
+                   label_sep = ",",
+                   count_column = NULL,
+                   show_outside = c("auto", "none", "always")) {
+  show_outside <- match.arg(show_outside)
+  venn <- prepare_venn_data(data, columns, show_elements, show_percentage, digits, denominator,
+                            label_sep, count_column = count_column, show_outside)
+  venn$shapes %>%
+    mutate(group = LETTERS[group]) %>%
+    ggplot() +
+    geom_polygon(aes(x = x, y = y, group = group, fill = group),
+                 alpha = fill_alpha) +
+    geom_polygon(aes(x = x, y = y, group = group),
+                 fill = NA,
+                 color = stroke_color,
+                 size = stroke_size,
+                 alpha = stroke_alpha,
+                 linetype = stroke_linetype) +
+    geom_text(data = venn$labels,
+              aes(x = x, y = y, label = text, hjust = hjust, vjust = vjust),
+              color = set_name_color,
+              size = set_name_size) +
+    geom_text(data = venn$texts,
+              aes(x = x, y = y, label = text, hjust = hjust, vjust = vjust),
+              color = text_color,
+              size = text_size) +
+    scale_x_continuous(limits = c(-2, 2)) +
+    scale_y_continuous(limits = c(-2, 2)) +
+    scale_fill_manual(values = fill_color) +
+    guides(fill = "none") +
+    coord_fixed() +
+    theme_void()
+}
+
+gen_circle <- function(group, x_offset = 0, y_offset = 0, radius = 1,
+                       radius_b = radius, theta_offset = 0, length.out = 100) {
+  tibble(group = group,
+         theta = seq(0, 2 * pi, length.out = length.out)) %>%
+    mutate(x_raw = radius * cos(theta),
+           y_raw = radius_b * sin(theta),
+           x = x_offset + x_raw * cos(theta_offset) - y_raw * sin(theta_offset),
+           y = y_offset + x_raw * sin(theta_offset) + y_raw * cos(theta_offset))
+}
+
+gen_circle_2 <- function() {
+  rbind(gen_circle(1L, -2/3, 0, 1),
+        gen_circle(2L, 2/3, 0, 1))
+}
+gen_text_pos_2 <- function() {
+  tribble(~name, ~x,    ~y,  ~hjust, ~vjust, ~A,    ~B,
+          "A",   -0.8,  0,   0.5,    0.5,    TRUE,  FALSE,
+          "B",    0.8,  0,   0.5,    0.5,    FALSE, TRUE,
+          "AB",   0,    0,   0.5,    0.5,    TRUE,  TRUE,
+          "-",    0,   -1.2, 0.5,    0.5,    FALSE, FALSE)
+}
+gen_label_pos_2 <- function() {
+  tribble(~name, ~x,   ~y,  ~hjust, ~vjust,
+          "A",   -0.8, 1.2, 0.5,    0,
+          "B",    0.8, 1.2, 0.5,    0)
+}
+
+gen_circle_3 <- function() {
+  rbind(gen_circle(1L, -2/3, (sqrt(3) + 2) / 6, 1),
+        gen_circle(2L, 2/3,(sqrt(3) + 2) / 6, 1),
+        gen_circle(3L, 0, -(sqrt(3) + 2) / 6, 1))
+}
+gen_text_pos_3 <- function() {
+  tribble(~name, ~x,    ~y,   ~hjust, ~vjust, ~A,    ~B,    ~C,
+          "A",   -0.8,  0.62, 0.5,    0.5,    TRUE,  FALSE, FALSE,
+          "B",    0.8,  0.62, 0.5,    0.5,    FALSE, TRUE,  FALSE,
+          "C",    0,   -0.62, 0.5,    0.5,    FALSE, FALSE, TRUE,
+          "AB",   0,    0.8,  0.5,    0.5,    TRUE,  TRUE,  FALSE,
+          "AC",  -0.5,  0,    0.5,    0.5,    TRUE,  FALSE, TRUE,
+          "BC",   0.5,  0,    0.5,    0.5,    FALSE, TRUE,  TRUE,
+          "ABC",  0,    0.2,  0.5,    0.5,    TRUE,  TRUE,  TRUE,
+          "-",    1.2, -0.8,  0,      0.5,    FALSE, FALSE, FALSE)
+}
+gen_label_pos_3 <- function() {
+  tribble(~name, ~x,    ~y,  ~hjust, ~vjust,
+          "A",   -0.8,  1.8, 0.5,    0,
+          "B",    0.8,  1.8, 0.5,    0,
+          "C",    0,   -1.8, 0.5,    1)
+}
+
+gen_circle_4 <- function() {
+  rbind(gen_circle(1L, -.7, -1/2, .75, 1.5, pi/4),
+        gen_circle(2L, -.72+2/3, -1/6, .75, 1.5, pi/4),
+        gen_circle(3L, .72-2/3, -1/6, .75, 1.5, -pi/4),
+        gen_circle(4L, .7, -1/2, .75, 1.5, -pi/4))
+}
+gen_text_pos_4 <- function() {
+  tribble(~name, ~x,    ~y,  ~hjust, ~vjust, ~A,   ~B,    ~C,    ~D,
+          "A",   -1.5,  0,   0.5,    0.5,    TRUE,  FALSE, FALSE, FALSE,
+          "B",   -0.6,  0.7, 0.5,    0.5,    FALSE, TRUE,  FALSE, FALSE,
+          "C",    0.6,  0.7, 0.5,    0.5,    FALSE, FALSE, TRUE,  FALSE,
+          "D",    1.5,  0,   0.5,    0.5,    FALSE, FALSE, FALSE, TRUE,
+          "AB",  -0.9,  0.3, 0.5,    0.5,    TRUE,  TRUE,  FALSE, FALSE,
+          "BC",   0,    0.4, 0.5,    0.5,    FALSE, TRUE,  TRUE,  FALSE,
+          "CD",   0.9,  0.3, 0.5,    0.5,    FALSE, FALSE, TRUE,  TRUE,
+          "AC",  -0.8, -0.9, 0.5,    0.5,    TRUE,  FALSE, TRUE,  FALSE,
+          "BD",   0.8, -0.9, 0.5,    0.5,    FALSE, TRUE,  FALSE, TRUE,
+          "AD",   0,   -1.4, 0.5,    0.5,    TRUE,  FALSE, FALSE, TRUE,
+          "ABC", -0.5, -0.2, 0.5,    0.5,    TRUE,  TRUE,  TRUE,  FALSE,
+          "BCD",  0.5, -0.2, 0.5,    0.5,    FALSE, TRUE,  TRUE,  TRUE,
+          "ACD", -0.3, -1.1, 0.5,    0.5,    TRUE,  FALSE, TRUE,  TRUE,
+          "ABD",  0.3, -1.1, 0.5,    0.5,    TRUE,  TRUE,  FALSE, TRUE,
+          "ABCD", 0,   -0.7, 0.5,    0.5,    TRUE,  TRUE,  TRUE,  TRUE,
+          "-",    0,   -1.9, 0.5,    0.5,    FALSE, FALSE, FALSE, FALSE)
+}
+gen_label_pos_4 <- function() {
+  tribble(~name, ~x,   ~y,   ~hjust, ~vjust,
+          "A",   -1.5, -1.3, 1,      1,
+          "B",   -0.8,  1.2, 0.5,    0,
+          "C",    0.8,  1.2, 0.5,    0,
+          "D",    1.5, -1.3, 0,      1)
+}
+
+prepare_venn_data <- function(data, columns = NULL,
+                              show_elements = FALSE, show_percentage = TRUE, digits = 1, denominator=10,
+                              label_sep = ",", count_column = NULL, show_outside = "auto") {
+  if (is.data.frame(data)) {
+    if (is.null(columns)) {
+      columns = data %>% select_if(is.logical) %>% names
+    }
+    if (!identical(show_elements, FALSE)) {
+      stopifnot(is.character(show_elements))
+      show_elements <- show_elements[[1]]
+      if (!(show_elements %in% names(data))) {
+        stop("`show_elements` should be one column name of the data frame")
+      }
+    }
+    if (length(columns) == 2) {
+      stopifnot(is.logical(as_tibble(data)[,columns[[1]], drop = TRUE]))
+      stopifnot(is.logical(as_tibble(data)[,columns[[2]], drop = TRUE]))
+      d <- gen_circle_2()
+      d1 <- gen_text_pos_2() %>% mutate(n = 0, text = "")
+      stopifnot((d1 %>% count(A, B) %>% with(n)) == 1)
+      for (i in 1:nrow(d1)) {
+        idx <- ((!xor(d1$A[[i]], as_tibble(data)[,columns[[1]]])) &
+                  (!xor(d1$B[[i]], as_tibble(data)[,columns[[2]]])))
+        if (is.null(count_column)) {
+          d1$n[[i]] <- sum(idx)
+        } else {
+          d1$n[[i]] <- sum(as_tibble(data)[,count_column][idx,])
+        }
+        if (!identical(show_elements, FALSE)) {
+          d1$text[[i]] <- paste(unlist(as_tibble(data)[idx,show_elements]), collapse = label_sep)
+        }
+      }
+      d2 <- gen_label_pos_2()
+    } else if (length(columns) == 3) {
+      stopifnot(is.logical(as_tibble(data)[,columns[[1]], drop = TRUE]))
+      stopifnot(is.logical(as_tibble(data)[,columns[[2]], drop = TRUE]))
+      stopifnot(is.logical(as_tibble(data)[,columns[[3]], drop = TRUE]))
+      d <- gen_circle_3()
+      d1 <- gen_text_pos_3() %>% mutate(n = 0, text = "")
+      stopifnot((d1 %>% count(A, B, C) %>% with(n)) == 1)
+      for (i in 1:nrow(d1)) {
+        idx <- ((!xor(d1$A[[i]], as_tibble(data)[,columns[[1]]])) &
+                  (!xor(d1$B[[i]], as_tibble(data)[,columns[[2]]])) &
+                  (!xor(d1$C[[i]], as_tibble(data)[,columns[[3]]])))
+        if (is.null(count_column)) {
+          d1$n[[i]] <- sum(idx)
+        } else {
+          d1$n[[i]] <- sum(as_tibble(data)[,count_column][idx,])
+        }
+        if (!identical(show_elements, FALSE)) {
+          d1$text[[i]] <- paste(unlist(as_tibble(data)[idx,show_elements]), collapse = label_sep)
+        }
+      }
+      d2 <- gen_label_pos_3()
+    } else if (length(columns) == 4) {
+      stopifnot(is.logical(as_tibble(data)[,columns[[1]], drop = TRUE]))
+      stopifnot(is.logical(as_tibble(data)[,columns[[2]], drop = TRUE]))
+      stopifnot(is.logical(as_tibble(data)[,columns[[3]], drop = TRUE]))
+      stopifnot(is.logical(as_tibble(data)[,columns[[4]], drop = TRUE]))
+      d <- gen_circle_4()
+      d1 <- gen_text_pos_4() %>% mutate(n = 0, text = "")
+      stopifnot((d1 %>% count(A, B, C, D) %>% with(n)) == 1)
+      for (i in 1:nrow(d1)) {
+        idx <- ((d1$A[[i]] == as_tibble(data)[,columns[[1]], drop = TRUE]) &
+                  (d1$B[[i]] == as_tibble(data)[,columns[[2]], drop = TRUE]) &
+                  (d1$C[[i]] == as_tibble(data)[,columns[[3]], drop = TRUE]) &
+                  (d1$D[[i]] == as_tibble(data)[,columns[[4]], drop = TRUE]))
+        if (is.null(count_column)) {
+          d1$n[[i]] <- sum(idx)
+        } else {
+          d1$n[[i]] <- sum(as_tibble(data)[,count_column][idx,])
+        }
+        if (!identical(show_elements, FALSE)) {
+          d1$text[[i]] <- paste(unlist(as_tibble(data)[idx,show_elements]), collapse = label_sep)
+        }
+      }
+      d2 <- gen_label_pos_4()
+    } else {
+      stop("logical columns in data.frame `data` or vector `columns` should be length between 2 and 4")
+    }
+    d2 <- d2 %>% mutate(text = columns)
+    show_elements <- !identical(show_elements, FALSE)
+  } else if (is.list(data)) {
+    if (is.null(columns)) {
+      columns <- names(data) %>% head(4)
+    }
+    a2 <- unique(unlist(data[columns]))
+    if (length(columns) == 2) {
+      d <- gen_circle_2()
+      d1 <- gen_text_pos_2() %>% mutate(n = 0, text = "")
+      stopifnot((d1 %>% count(A, B, wt = 1) %>% with(n)) == 1)
+      for (i in 1:nrow(d1)) {
+        idx <- ((!xor(d1$A[[i]], a2 %in% data[[columns[[1]]]])) &
+                  (!xor(d1$B[[i]], a2 %in% data[[columns[[2]]]])))
+        d1$n[[i]] <- sum(idx)
+        d1$text[[i]] <- paste(a2[idx], collapse = label_sep)
+      }
+      d2 <- gen_label_pos_2()
+    } else if (length(columns) == 3) {
+      d <- gen_circle_3()
+      d1 <- gen_text_pos_3() %>% mutate(n = 0, text = "")
+      stopifnot((d1 %>% count(A, B, C, wt = 1) %>% with(n)) == 1)
+      for (i in 1:nrow(d1)) {
+        idx <- ((!xor(d1$A[[i]], a2 %in% data[[columns[[1]]]])) &
+                  (!xor(d1$B[[i]], a2 %in% data[[columns[[2]]]])) &
+                  (!xor(d1$C[[i]], a2 %in% data[[columns[[3]]]])))
+        d1$n[[i]] <- sum(idx)
+        d1$text[[i]] <- paste(a2[idx], collapse = label_sep)
+      }
+      d2 <- gen_label_pos_3()
+    } else if (length(columns) == 4) {
+      d <- gen_circle_4()
+      d1 <- gen_text_pos_4() %>% mutate(n = 0, text = "")
+      stopifnot((d1 %>% count(A, B, C, D, wt = 1) %>% with(n)) == 1)
+      for (i in 1:nrow(d1)) {
+        idx <- ((!xor(d1$A[[i]], a2 %in% data[[columns[[1]]]])) &
+                  (!xor(d1$B[[i]], a2 %in% data[[columns[[2]]]])) &
+                  (!xor(d1$C[[i]], a2 %in% data[[columns[[3]]]])) &
+                  (!xor(d1$D[[i]], a2 %in% data[[columns[[4]]]])))
+        d1$n[[i]] <- sum(idx)
+        d1$text[[i]] <- paste(a2[idx], collapse = label_sep)
+      }
+      d2 <- gen_label_pos_4()
+    } else {
+      stop("list `data` or vector `column` should be length between 2 and 4")
+    }
+    d2 <- d2 %>% mutate(text = columns)
+  } else {
+    stop("`data` should be either a list or a data.frame")
+  }
+  if ((show_outside == "none") || (show_outside == "auto" & d1$n[[nrow(d1)]] == 0)) {
+    if (d1$n[[nrow(d1)]] > 0)
+      message("Although not display in plot, outside elements are still count in percentages.")
+    d1 <- d1[-nrow(d1), ]
+  }
+  if (!show_elements) {
+    if (show_percentage) {
+      fmt <- sprintf("%%d\n(%%.%df%%%%)", digits)
+      d1 <- d1 %>% mutate(text = sprintf(fmt, n, 100 * n / denominator))
+    } else {
+      d1 <- d1 %>% mutate(text = sprintf("%d", n))
+    }
+  }
+  list(shapes = d, texts = d1, labels = d2)
+}
+```````````
+
+``````{r load, include=FALSE}
+require(foreign)
+require(Hmisc)
+library(lme4)
+library(car)
+library(plyr)
+library(dplyr)
+library(broom)
+require(epitools)
+
+data<-spss.get("~/Downloads/BIOPATHEpidemio.sav")
+
+
+### Exclusions 
+N_total<-dim(data)[1]
+N_exc_base<-length(which(data$Excludeall=="Exclude all data and samples"))
+data<-data[which(data$Excludeall!="Exclude all data and samples"),]
+N_after_ex_base<-dim(data)[1]
+
+### Follow up 
+data_follow_up<-data[which(data$includey2=="Include"),]
+N_follow_up<- dim(data_follow_up)[1]
+
+### Clinical
+datac<-spss.get("~/Downloads/BIOPATHEpidemio.sav")
+data_clinical<-datac[which(datac$includemini=="Include"),]
+N_clinical<- dim(data_clinical)[1]
+````````````
+
+``````{r prepare, include=FALSE}
+
+df1<-data %>%
+  select(
+         IDmerge, includey1,includey2,
+         cDem1,
+         AgeCalculatedVaST,
+         AgeCalculated,
+         TimeCatY1,
+         pDem19,pDem19y2,
+         cDem9A,cDem9Ay2,
+         DepCurrStr2CGI3,
+         AnxAnyCurrStr2CGI3,
+         PTSDCurrStr2CGI3,
+         ConCurrStr2CGI3,
+         GADCurrStr2CGI3,PanCurrStr2CGI3,AgoCurrStr2CGI3,SepCurrStr2CGI3,SocCurrStr2CGI3,SpeCurrStr2CGI3,
+         OCDCurrStr2CGI3,ADHDCurrStr2CGI3,PsyCurr3,EDCurr3,
+         cDEPbriefCut10,cDEPbriefCut10y2,cANXbriefCut10,cANXY2Cut12,
+         cPTSDtotCut12,cPTSDtotCut12y2,pSDQEXTtotCut12,pSDQEXTtotCut12y2
+       )
+
+
+df1$TimeCatY1<-revalue(df1$TimeCatY1, c("0-6 months ago" = 1, 
+                                   "6-12 months ago" =2,
+                                   "12-18 months ago" = 3,
+                                    "18-24 months ago" = 4,
+                                    "24-36 months ago"= 6,
+                                    "36-48 months ago"= 8,
+                                     ">48 months ago"= 10
+                                                ))
+df1$TimeCatY1<-as.numeric(df1$TimeCatY1)
+
+`````````
+
+# Cinical interview
+
+First, a Veen diagram was constructed and plotted for the sub-sample with diagnoses ascribed after clinical interview: 
+````{r VAST}
+df_VAST<-df1[which(df1$AgeCalculatedVaST!="NA"),]
+
+df_VAST$Dep=df_VAST$DepCurrStr2CGI3
+df_VAST$Anx<-df_VAST$AnxAnyCurrStr2CGI3
+df_VAST$PTSD<-df_VAST$PTSDCurrStr2CGI3
+df_VAST$ODD<-df_VAST$ConCurrStr2CGI3
+
+levels(df_VAST$Dep)[levels(df_VAST$Dep)=="Diagnosis of depression (MINI KID) and CGIs >=4"] <- "1"
+levels(df_VAST$Dep)[levels(df_VAST$Dep)!="1"] <- "0"
+levels(df_VAST$Anx)[levels(df_VAST$Anx)=="Diagnosis of anxiety disorder (MINI KID) and CGIs >=4"] <- "1"
+levels(df_VAST$Anx)[levels(df_VAST$Anx)!="1"] <- "0"
+levels(df_VAST$PTSD)[levels(df_VAST$PTSD)=="Diagnosis of PTSD (MINI KID) and CGIs >=4"] <- "1"
+levels(df_VAST$PTSD)[levels(df_VAST$PTSD)!="1"] <- "0"
+levels(df_VAST$ODD)[levels(df_VAST$ODD)=="Diagnosis of CD/ODD (MINI KID) and CGIs >=4"] <- "1"
+levels(df_VAST$ODD)[levels(df_VAST$ODD)!="1"] <- "0"
+
+Dep<-df_VAST$IDmerge[which(df_VAST$Dep==1)]
+Anx<-df_VAST$IDmerge[which(df_VAST$Anx==1)]
+PTSD<-df_VAST$IDmerge[which(df_VAST$PTSD==1)]
+ODD<-df_VAST$IDmerge[which(df_VAST$ODD==1)]
+
+
+x <- list(
+  Depression = Dep, 
+  Anxiety = Anx,
+  PTSD= PTSD,
+  "CD/ODD" = ODD
+  )
+
+ggvenn(x, denominator=dim(df_VAST)[1],
+  fill_color = c("#0073C2FF", "#EFC000FF", "#18A558", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+````````
+
+# Baseline
+
+Then, a Veen diagram was contructed using the corrected cut-offs for children and parent-reported scales at the baseline:
+````{r firstwave}
+df_Y1<-df1[which(df1$includey1=="Include"),]
+
+
+df_Y1$Dep=df_Y1$cDEPbriefCut10
+df_Y1$Anx<-df_Y1$cANXbriefCut10
+df_Y1$PTSD<-df_Y1$cPTSDtotCut12
+df_Y1$ODD<-df_Y1$pSDQEXTtotCut12
+
+Dep<-df_Y1$IDmerge[which(df_Y1$Dep==1)]
+Anx<-df_Y1$IDmerge[which(df_Y1$Anx==1)]
+PTSD<-df_Y1$IDmerge[which(df_Y1$PTSD==1)]
+ODD<-df_Y1$IDmerge[which(df_Y1$ODD==1)]
+
+
+x <- list(
+  Depression = Dep, 
+  Anxiety = Anx,
+  PTSD= PTSD,
+  "CD/ODD" = ODD
+  )
+
+
+ggvenn(x, denominator=dim(df_Y1)[1],
+  fill_color = c("#0073C2FF", "#EFC000FF", "#18A558", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+``````
+
+# Follow-up
+
+and at the follow-up one year latter:
+````{r secondwave}
+df_Y2<-df1[which(df1$includey2=="Include"),]
+
+df_Y2$Dep=df_Y2$cDEPbriefCut10y2
+df_Y2$Anx<-df_Y2$cANXY2Cut12
+df_Y2$PTSD<-df_Y2$cPTSDtotCut12y2
+df_Y2$ODD<-df_Y2$pSDQEXTtotCut12y2
+
+
+
+Dep<-df_Y2$IDmerge[which(df_Y2$Dep==1)]
+Anx<-df_Y2$IDmerge[which(df_Y2$Anx==1)]
+PTSD<-df_Y2$IDmerge[which(df_Y2$PTSD==1)]
+ODD<-df_Y2$IDmerge[which(df_Y2$ODD==1)]
+
+
+x <- list(
+  Depression = Dep, 
+  Anxiety = Anx,
+  PTSD= PTSD,
+  "CD/ODD" = ODD
+  )
+ggvenn(x, denominator=dim(df_Y2)[1],
+  fill_color = c("#0073C2FF", "#EFC000FF", "#18A558", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+
+```````
+
+# Quantifying and testing associations
+
+Odds ratios were calculate to quantify the association between mental health disorder in the sample with a clinical interview and at both data collection time points.
+```````{r ORS, echo=FALSE}
+
+PTSD_ANX<-array(0,dim(df_VAST[1]))
+PTSD_ANX[which(df_VAST$PTSD==1 & df_VAST$Anx==1)]<-1
+PTSD_DEP<-array(0,dim(df_VAST[1]))
+PTSD_DEP[which(df_VAST$PTSD==1 & df_VAST$Dep==1)]<-1
+ANX_DEP<-array(0,dim(df_VAST[1]))
+ANX_DEP[which(df_VAST$Anx==1 & df_VAST$Dep==1)]<-1
+ANX_DEP_EXT<-array(0,dim(df_VAST[1]))
+ANX_DEP_EXT[which(df_VAST$Anx==1 & df_VAST$Dep==1 & df_VAST$ODD==1)]<-1
+
+or_results<-rbind(
+oddsratio.wald(table(df_VAST$PTSD,df_VAST$Dep))$measure[2,],
+oddsratio.wald(table(df_VAST$PTSD,df_VAST$Anx))$measure[2,],
+oddsratio.wald(table(df_VAST$PTSD,df_VAST$ODD))$measure[2,],
+oddsratio.wald(table(df_VAST$Dep,df_VAST$Anx))$measure[2,],
+oddsratio.wald(table(df_VAST$Dep,df_VAST$ODD))$measure[2,],
+oddsratio.wald(table(df_VAST$ODD,df_VAST$Anx))$measure[2,],
+
+oddsratio.wald(table(PTSD_ANX,df_VAST$Dep))$measure[2,],
+oddsratio.wald(table(PTSD_ANX,df_VAST$ODD))$measure[2,],
+oddsratio.wald(table(PTSD_DEP,df_VAST$ODD))$measure[2,],
+oddsratio.wald(table(ANX_DEP,df_VAST$ODD))$measure[2,],
+oddsratio.wald(table(ANX_DEP_EXT,df_VAST$PTSD))$measure[2,]
+)
+
+pv<-rbind(
+oddsratio.wald(table(df_VAST$PTSD,df_VAST$Dep))$p.value[2,2],
+oddsratio.wald(table(df_VAST$PTSD,df_VAST$Anx))$p.value[2,2],
+oddsratio.wald(table(df_VAST$PTSD,df_VAST$ODD))$p.value[2,2],
+oddsratio.wald(table(df_VAST$Dep,df_VAST$Anx))$p.value[2,2],
+oddsratio.wald(table(df_VAST$Dep,df_VAST$ODD))$p.value[2,2],
+oddsratio.wald(table(df_VAST$ODD,df_VAST$Anx))$p.value[2,2],
+
+oddsratio.wald(table(PTSD_ANX,df_VAST$Dep))$p.value[2,2],
+oddsratio.wald(table(PTSD_ANX,df_VAST$ODD))$p.value[2,2],
+oddsratio.wald(table(PTSD_DEP,df_VAST$ODD))$p.value[2,2],
+oddsratio.wald(table(ANX_DEP,df_VAST$ODD))$p.value[2,2],
+oddsratio.wald(table(ANX_DEP_EXT,df_VAST$PTSD))$p.value[2,2]
+)
+
+res_VAST<-as.data.frame(cbind(or_results,p.adjust(pv,method="bonferroni")))
+
+
+PTSD_ANX<-array(0,dim(df_Y1[1]))
+PTSD_ANX[which(df_Y1$PTSD==1 & df_Y1$Anx==1)]<-1
+PTSD_DEP<-array(0,dim(df_Y1[1]))
+PTSD_DEP[which(df_Y1$PTSD==1 & df_Y1$Dep==1)]<-1
+ANX_DEP<-array(0,dim(df_Y1[1]))
+ANX_DEP[which(df_Y1$Anx==1 & df_Y1$Dep==1)]<-1
+ANX_DEP_EXT<-array(0,dim(df_Y1[1]))
+ANX_DEP_EXT[which(df_Y1$Anx==1 & df_Y1$Dep==1 & df_Y1$ODD==1)]<-1
+
+
+or_results<-rbind(
+oddsratio.wald(table(df_Y1$PTSD,df_Y1$Dep))$measure[2,],
+oddsratio.wald(table(df_Y1$PTSD,df_Y1$Anx))$measure[2,],
+oddsratio.wald(table(df_Y1$PTSD,df_Y1$ODD))$measure[2,],
+oddsratio.wald(table(df_Y1$Dep,df_Y1$Anx))$measure[2,],
+oddsratio.wald(table(df_Y1$Dep,df_Y1$ODD))$measure[2,],
+oddsratio.wald(table(df_Y1$ODD,df_Y1$Anx))$measure[2,],
+
+oddsratio.wald(table(PTSD_ANX,df_Y1$Dep))$measure[2,],
+oddsratio.wald(table(PTSD_ANX,df_Y1$ODD))$measure[2,],
+oddsratio.wald(table(PTSD_DEP,df_Y1$ODD))$measure[2,],
+oddsratio.wald(table(ANX_DEP,df_Y1$ODD))$measure[2,],
+oddsratio.wald(table(ANX_DEP_EXT,df_Y1$PTSD))$measure[2,]
+)
+
+pv<-rbind(
+oddsratio.wald(table(df_Y1$PTSD,df_Y1$Dep))$p.value[2,2],
+oddsratio.wald(table(df_Y1$PTSD,df_Y1$Anx))$p.value[2,2],
+oddsratio.wald(table(df_Y1$PTSD,df_Y1$ODD))$p.value[2,2],
+oddsratio.wald(table(df_Y1$Dep,df_Y1$Anx))$p.value[2,2],
+oddsratio.wald(table(df_Y1$Dep,df_Y1$ODD))$p.value[2,2],
+oddsratio.wald(table(df_Y1$ODD,df_Y1$Anx))$p.value[2,2],
+
+
+oddsratio.wald(table(PTSD_ANX,df_Y1$Dep))$p.value[2,2],
+oddsratio.wald(table(PTSD_ANX,df_Y1$ODD))$p.value[2,2],
+oddsratio.wald(table(PTSD_DEP,df_Y1$ODD))$p.value[2,2],
+oddsratio.wald(table(ANX_DEP,df_Y1$ODD))$p.value[2,2],
+oddsratio.wald(table(ANX_DEP_EXT,df_Y1$PTSD))$p.value[2,2]
+)
+
+res_Y1<-as.data.frame(cbind(or_results,p.adjust(pv,method="bonferroni")))
+
+
+PTSD_ANX<-array(0,dim(df_Y2[1]))
+PTSD_ANX[which(df_Y2$PTSD==1 & df_Y2$Anx==1)]<-1
+PTSD_DEP<-array(0,dim(df_Y2[1]))
+PTSD_DEP[which(df_Y2$PTSD==1 & df_Y2$Dep==1)]<-1
+ANX_DEP<-array(0,dim(df_Y2[1]))
+ANX_DEP[which(df_Y2$Anx==1 & df_Y2$Dep==1)]<-1
+ANX_DEP_EXT<-array(0,dim(df_Y2[1]))
+ANX_DEP_EXT[which(df_Y2$Anx==1 & df_Y2$Dep==1 & df_Y2$ODD==1)]<-1
+
+
+or_results<-rbind(
+oddsratio.wald(table(df_Y2$PTSD,df_Y2$Dep))$measure[2,],
+oddsratio.wald(table(df_Y2$PTSD,df_Y2$Anx))$measure[2,],
+oddsratio.wald(table(df_Y2$PTSD,df_Y2$ODD))$measure[2,],
+oddsratio.wald(table(df_Y2$Dep,df_Y2$Anx))$measure[2,],
+oddsratio.wald(table(df_Y2$Dep,df_Y2$ODD))$measure[2,],
+oddsratio.wald(table(df_Y2$ODD,df_Y2$Anx))$measure[2,],
+
+oddsratio.wald(table(PTSD_ANX,df_Y2$Dep))$measure[2,],
+oddsratio.wald(table(PTSD_ANX,df_Y2$ODD))$measure[2,],
+oddsratio.wald(table(PTSD_DEP,df_Y2$ODD))$measure[2,],
+oddsratio.wald(table(ANX_DEP,df_Y2$ODD))$measure[2,],
+oddsratio.wald(table(ANX_DEP_EXT,df_Y2$PTSD))$measure[2,]
+)
+
+pv<-rbind(
+oddsratio.wald(table(df_Y2$PTSD,df_Y2$Dep))$p.value[2,2],
+oddsratio.wald(table(df_Y2$PTSD,df_Y2$Anx))$p.value[2,2],
+oddsratio.wald(table(df_Y2$PTSD,df_Y2$ODD))$p.value[2,2],
+oddsratio.wald(table(df_Y2$Dep,df_Y2$Anx))$p.value[2,2],
+oddsratio.wald(table(df_Y2$Dep,df_Y2$ODD))$p.value[2,2],
+oddsratio.wald(table(df_Y2$ODD,df_Y2$Anx))$p.value[2,2],
+
+oddsratio.wald(table(PTSD_ANX,df_Y2$Dep))$p.value[2,2],
+oddsratio.wald(table(PTSD_ANX,df_Y2$ODD))$p.value[2,2],
+oddsratio.wald(table(PTSD_DEP,df_Y2$ODD))$p.value[2,2],
+oddsratio.wald(table(ANX_DEP,df_Y2$ODD))$p.value[2,2],
+oddsratio.wald(table(ANX_DEP_EXT,df_Y2$PTSD))$p.value[2,2]
+)
+
+res_Y2<-as.data.frame(cbind(or_results,p.adjust(pv,method="bonferroni")))
+
+res<-cbind(res_Y1,res_Y2,res_VAST)
+row.names(res)<-c("PTSD - Depression", "PTSD - Anxiety", "PTSD - ODD", 
+                       "Depression - Anxiety", "Depression - ODD",
+                       "ODD - Anxiety", "PTSD + Anxiety - Depression",
+                  "PTSD + Anxiety - ODD", "PTSD + Depression - ODD",
+                  "Anxiety + Depression - ODD", "Anxiety + Depression + ODD - PTSD")
+
+
+res
+````````
+
+
+# Complimentary analysis 
+
+Veen diagrams were constructed separately for each sex and for younger (<=11 years old at baseline) and older (>11 y.o.) children for both time points and for the subsample with a clinical interview. The results are summarized in the Supplementary Figure XXXXXX. 
+
+## Clinical interview subsample 
+### Boys
+````{r VAST boys}
+df_VAST<-df1[which(df1$AgeCalculatedVaST!="NA" & df1$cDem1=="Male"),]
+
+df_VAST$Dep=df_VAST$DepCurrStr2CGI3
+df_VAST$Anx<-df_VAST$AnxAnyCurrStr2CGI3
+df_VAST$PTSD<-df_VAST$PTSDCurrStr2CGI3
+df_VAST$ODD<-df_VAST$ConCurrStr2CGI3
+
+levels(df_VAST$Dep)[levels(df_VAST$Dep)=="Diagnosis of depression (MINI KID) and CGIs >=4"] <- "1"
+levels(df_VAST$Dep)[levels(df_VAST$Dep)!="1"] <- "0"
+levels(df_VAST$Anx)[levels(df_VAST$Anx)=="Diagnosis of anxiety disorder (MINI KID) and CGIs >=4"] <- "1"
+levels(df_VAST$Anx)[levels(df_VAST$Anx)!="1"] <- "0"
+levels(df_VAST$PTSD)[levels(df_VAST$PTSD)=="Diagnosis of PTSD (MINI KID) and CGIs >=4"] <- "1"
+levels(df_VAST$PTSD)[levels(df_VAST$PTSD)!="1"] <- "0"
+levels(df_VAST$ODD)[levels(df_VAST$ODD)=="Diagnosis of CD/ODD (MINI KID) and CGIs >=4"] <- "1"
+levels(df_VAST$ODD)[levels(df_VAST$ODD)!="1"] <- "0"
+
+Dep<-df_VAST$IDmerge[which(df_VAST$Dep==1)]
+Anx<-df_VAST$IDmerge[which(df_VAST$Anx==1)]
+PTSD<-df_VAST$IDmerge[which(df_VAST$PTSD==1)]
+ODD<-df_VAST$IDmerge[which(df_VAST$ODD==1)]
+
+
+x <- list(
+  Depression = Dep, 
+  Anxiety = Anx,
+  PTSD= PTSD,
+  "CD/ODD" = ODD
+  )
+
+ggvenn(x, denominator=dim(df_VAST)[1],
+  fill_color = c("#0073C2FF", "#EFC000FF", "#18A558", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+````````
+
+### Girls
+````{r VAST girls}
+df_VAST<-df1[which(df1$AgeCalculatedVaST!="NA" & df1$cDem1=="Female"),]
+
+
+df_VAST$Dep=df_VAST$DepCurrStr2CGI3
+df_VAST$Anx<-df_VAST$AnxAnyCurrStr2CGI3
+df_VAST$PTSD<-df_VAST$PTSDCurrStr2CGI3
+df_VAST$ODD<-df_VAST$ConCurrStr2CGI3
+
+levels(df_VAST$Dep)[levels(df_VAST$Dep)=="Diagnosis of depression (MINI KID) and CGIs >=4"] <- "1"
+levels(df_VAST$Dep)[levels(df_VAST$Dep)!="1"] <- "0"
+levels(df_VAST$Anx)[levels(df_VAST$Anx)=="Diagnosis of anxiety disorder (MINI KID) and CGIs >=4"] <- "1"
+levels(df_VAST$Anx)[levels(df_VAST$Anx)!="1"] <- "0"
+levels(df_VAST$PTSD)[levels(df_VAST$PTSD)=="Diagnosis of PTSD (MINI KID) and CGIs >=4"] <- "1"
+levels(df_VAST$PTSD)[levels(df_VAST$PTSD)!="1"] <- "0"
+levels(df_VAST$ODD)[levels(df_VAST$ODD)=="Diagnosis of CD/ODD (MINI KID) and CGIs >=4"] <- "1"
+levels(df_VAST$ODD)[levels(df_VAST$ODD)!="1"] <- "0"
+
+Dep<-df_VAST$IDmerge[which(df_VAST$Dep==1)]
+Anx<-df_VAST$IDmerge[which(df_VAST$Anx==1)]
+PTSD<-df_VAST$IDmerge[which(df_VAST$PTSD==1)]
+ODD<-df_VAST$IDmerge[which(df_VAST$ODD==1)]
+
+
+x <- list(
+  Depression = Dep, 
+  Anxiety = Anx,
+  PTSD= PTSD,
+  "CD/ODD" = ODD
+  )
+
+ggvenn(x, denominator=dim(df_VAST)[1],
+  fill_color = c("#0073C2FF", "#EFC000FF", "#18A558", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+````````
+### Younger
+````{r VAST younger}
+df_VAST<-df1[which(df1$AgeCalculatedVaST!="NA" & df1$AgeCalculated<=11.0),]
+
+
+df_VAST$Dep=df_VAST$DepCurrStr2CGI3
+df_VAST$Anx<-df_VAST$AnxAnyCurrStr2CGI3
+df_VAST$PTSD<-df_VAST$PTSDCurrStr2CGI3
+df_VAST$ODD<-df_VAST$ConCurrStr2CGI3
+
+levels(df_VAST$Dep)[levels(df_VAST$Dep)=="Diagnosis of depression (MINI KID) and CGIs >=4"] <- "1"
+levels(df_VAST$Dep)[levels(df_VAST$Dep)!="1"] <- "0"
+levels(df_VAST$Anx)[levels(df_VAST$Anx)=="Diagnosis of anxiety disorder (MINI KID) and CGIs >=4"] <- "1"
+levels(df_VAST$Anx)[levels(df_VAST$Anx)!="1"] <- "0"
+levels(df_VAST$PTSD)[levels(df_VAST$PTSD)=="Diagnosis of PTSD (MINI KID) and CGIs >=4"] <- "1"
+levels(df_VAST$PTSD)[levels(df_VAST$PTSD)!="1"] <- "0"
+levels(df_VAST$ODD)[levels(df_VAST$ODD)=="Diagnosis of CD/ODD (MINI KID) and CGIs >=4"] <- "1"
+levels(df_VAST$ODD)[levels(df_VAST$ODD)!="1"] <- "0"
+
+Dep<-df_VAST$IDmerge[which(df_VAST$Dep==1)]
+Anx<-df_VAST$IDmerge[which(df_VAST$Anx==1)]
+PTSD<-df_VAST$IDmerge[which(df_VAST$PTSD==1)]
+ODD<-df_VAST$IDmerge[which(df_VAST$ODD==1)]
+
+
+x <- list(
+  Depression = Dep, 
+  Anxiety = Anx,
+  PTSD= PTSD,
+  "CD/ODD" = ODD
+  )
+
+ggvenn(x, denominator=dim(df_VAST)[1],
+  fill_color = c("#0073C2FF", "#EFC000FF", "#18A558", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+`````````
+
+
+### Older 
+````{r VAST older}
+df_VAST<-df1[which(df1$AgeCalculatedVaST!="NA" & df1$AgeCalculated>11.0),]
+
+
+df_VAST$Dep=df_VAST$DepCurrStr2CGI3
+df_VAST$Anx<-df_VAST$AnxAnyCurrStr2CGI3
+df_VAST$PTSD<-df_VAST$PTSDCurrStr2CGI3
+df_VAST$ODD<-df_VAST$ConCurrStr2CGI3
+
+levels(df_VAST$Dep)[levels(df_VAST$Dep)=="Diagnosis of depression (MINI KID) and CGIs >=4"] <- "1"
+levels(df_VAST$Dep)[levels(df_VAST$Dep)!="1"] <- "0"
+levels(df_VAST$Anx)[levels(df_VAST$Anx)=="Diagnosis of anxiety disorder (MINI KID) and CGIs >=4"] <- "1"
+levels(df_VAST$Anx)[levels(df_VAST$Anx)!="1"] <- "0"
+levels(df_VAST$PTSD)[levels(df_VAST$PTSD)=="Diagnosis of PTSD (MINI KID) and CGIs >=4"] <- "1"
+levels(df_VAST$PTSD)[levels(df_VAST$PTSD)!="1"] <- "0"
+levels(df_VAST$ODD)[levels(df_VAST$ODD)=="Diagnosis of CD/ODD (MINI KID) and CGIs >=4"] <- "1"
+levels(df_VAST$ODD)[levels(df_VAST$ODD)!="1"] <- "0"
+
+Dep<-df_VAST$IDmerge[which(df_VAST$Dep==1)]
+Anx<-df_VAST$IDmerge[which(df_VAST$Anx==1)]
+PTSD<-df_VAST$IDmerge[which(df_VAST$PTSD==1)]
+ODD<-df_VAST$IDmerge[which(df_VAST$ODD==1)]
+
+
+x <- list(
+  Depression = Dep, 
+  Anxiety = Anx,
+  PTSD= PTSD,
+  "CD/ODD" = ODD
+  )
+
+ggvenn(x, denominator=dim(df_VAST)[1],
+  fill_color = c("#0073C2FF", "#EFC000FF", "#18A558", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+`````````
+
+### Recent 
+````{r VAST recent}
+df_VAST<-df1[which(df1$AgeCalculatedVaST!="NA" & df1$TimeCatY1<8),]
+
+
+df_VAST$Dep=df_VAST$DepCurrStr2CGI3
+df_VAST$Anx<-df_VAST$AnxAnyCurrStr2CGI3
+df_VAST$PTSD<-df_VAST$PTSDCurrStr2CGI3
+df_VAST$ODD<-df_VAST$ConCurrStr2CGI3
+
+levels(df_VAST$Dep)[levels(df_VAST$Dep)=="Diagnosis of depression (MINI KID) and CGIs >=4"] <- "1"
+levels(df_VAST$Dep)[levels(df_VAST$Dep)!="1"] <- "0"
+levels(df_VAST$Anx)[levels(df_VAST$Anx)=="Diagnosis of anxiety disorder (MINI KID) and CGIs >=4"] <- "1"
+levels(df_VAST$Anx)[levels(df_VAST$Anx)!="1"] <- "0"
+levels(df_VAST$PTSD)[levels(df_VAST$PTSD)=="Diagnosis of PTSD (MINI KID) and CGIs >=4"] <- "1"
+levels(df_VAST$PTSD)[levels(df_VAST$PTSD)!="1"] <- "0"
+levels(df_VAST$ODD)[levels(df_VAST$ODD)=="Diagnosis of CD/ODD (MINI KID) and CGIs >=4"] <- "1"
+levels(df_VAST$ODD)[levels(df_VAST$ODD)!="1"] <- "0"
+
+Dep<-df_VAST$IDmerge[which(df_VAST$Dep==1)]
+Anx<-df_VAST$IDmerge[which(df_VAST$Anx==1)]
+PTSD<-df_VAST$IDmerge[which(df_VAST$PTSD==1)]
+ODD<-df_VAST$IDmerge[which(df_VAST$ODD==1)]
+
+
+x <- list(
+  Depression = Dep, 
+  Anxiety = Anx,
+  PTSD= PTSD,
+  "CD/ODD" = ODD
+  )
+
+ggvenn(x, denominator=dim(df_VAST)[1],
+  fill_color = c("#0073C2FF", "#EFC000FF", "#18A558", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+`````````
+### Protacted 
+````{r VAST protacted}
+df_VAST<-df1[which(df1$AgeCalculatedVaST!="NA" & df1$TimeCatY1>6),]
+
+
+df_VAST$Dep=df_VAST$DepCurrStr2CGI3
+df_VAST$Anx<-df_VAST$AnxAnyCurrStr2CGI3
+df_VAST$PTSD<-df_VAST$PTSDCurrStr2CGI3
+df_VAST$ODD<-df_VAST$ConCurrStr2CGI3
+
+levels(df_VAST$Dep)[levels(df_VAST$Dep)=="Diagnosis of depression (MINI KID) and CGIs >=4"] <- "1"
+levels(df_VAST$Dep)[levels(df_VAST$Dep)!="1"] <- "0"
+levels(df_VAST$Anx)[levels(df_VAST$Anx)=="Diagnosis of anxiety disorder (MINI KID) and CGIs >=4"] <- "1"
+levels(df_VAST$Anx)[levels(df_VAST$Anx)!="1"] <- "0"
+levels(df_VAST$PTSD)[levels(df_VAST$PTSD)=="Diagnosis of PTSD (MINI KID) and CGIs >=4"] <- "1"
+levels(df_VAST$PTSD)[levels(df_VAST$PTSD)!="1"] <- "0"
+levels(df_VAST$ODD)[levels(df_VAST$ODD)=="Diagnosis of CD/ODD (MINI KID) and CGIs >=4"] <- "1"
+levels(df_VAST$ODD)[levels(df_VAST$ODD)!="1"] <- "0"
+
+Dep<-df_VAST$IDmerge[which(df_VAST$Dep==1)]
+Anx<-df_VAST$IDmerge[which(df_VAST$Anx==1)]
+PTSD<-df_VAST$IDmerge[which(df_VAST$PTSD==1)]
+ODD<-df_VAST$IDmerge[which(df_VAST$ODD==1)]
+
+
+x <- list(
+  Depression = Dep, 
+  Anxiety = Anx,
+  PTSD= PTSD,
+  "CD/ODD" = ODD
+  )
+
+ggvenn(x, denominator=dim(df_VAST)[1],
+  fill_color = c("#0073C2FF", "#EFC000FF", "#18A558", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+`````````
+## Baseline 
+
+###  Boys
+````{r firstwaveboys}
+df_Y1<-df1[which(df1$includey1=="Include" & df1$cDem1=="Male"),]
+
+
+df_Y1$Dep=df_Y1$cDEPbriefCut10
+df_Y1$Anx<-df_Y1$cANXbriefCut10
+df_Y1$PTSD<-df_Y1$cPTSDtotCut12
+df_Y1$ODD<-df_Y1$pSDQEXTtotCut12
+
+Dep<-df_Y1$IDmerge[which(df_Y1$Dep==1)]
+Anx<-df_Y1$IDmerge[which(df_Y1$Anx==1)]
+PTSD<-df_Y1$IDmerge[which(df_Y1$PTSD==1)]
+ODD<-df_Y1$IDmerge[which(df_Y1$ODD==1)]
+
+
+x <- list(
+  Depression = Dep, 
+  Anxiety = Anx,
+  PTSD= PTSD,
+  "CD/ODD" = ODD
+  )
+
+
+ggvenn(x, denominator=dim(df_Y1)[1],
+  fill_color = c("#0073C2FF", "#EFC000FF", "#18A558", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+``````
+
+
+### Girls
+````{r firstwavegirls}
+df_Y1<-df1[which(df1$includey1=="Include" & df1$cDem1=="Female"),]
+
+
+df_Y1$Dep=df_Y1$cDEPbriefCut10
+df_Y1$Anx<-df_Y1$cANXbriefCut10
+df_Y1$PTSD<-df_Y1$cPTSDtotCut12
+df_Y1$ODD<-df_Y1$pSDQEXTtotCut12
+
+Dep<-df_Y1$IDmerge[which(df_Y1$Dep==1)]
+Anx<-df_Y1$IDmerge[which(df_Y1$Anx==1)]
+PTSD<-df_Y1$IDmerge[which(df_Y1$PTSD==1)]
+ODD<-df_Y1$IDmerge[which(df_Y1$ODD==1)]
+
+
+x <- list(
+  Depression = Dep, 
+  Anxiety = Anx,
+  PTSD= PTSD,
+  "CD/ODD" = ODD
+  )
+
+
+ggvenn(x, denominator=dim(df_Y1)[1],
+  fill_color = c("#0073C2FF", "#EFC000FF", "#18A558", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+``````
+
+
+### Younger
+````{r firstwaveyoung}
+df_Y1<-df1[which(df1$includey1=="Include" & df1$AgeCalculated <= 11.0),]
+
+
+df_Y1$Dep=df_Y1$cDEPbriefCut10
+df_Y1$Anx<-df_Y1$cANXbriefCut10
+df_Y1$PTSD<-df_Y1$cPTSDtotCut12
+df_Y1$ODD<-df_Y1$pSDQEXTtotCut12
+
+Dep<-df_Y1$IDmerge[which(df_Y1$Dep==1)]
+Anx<-df_Y1$IDmerge[which(df_Y1$Anx==1)]
+PTSD<-df_Y1$IDmerge[which(df_Y1$PTSD==1)]
+ODD<-df_Y1$IDmerge[which(df_Y1$ODD==1)]
+
+
+x <- list(
+  Depression = Dep, 
+  Anxiety = Anx,
+  PTSD= PTSD,
+  "CD/ODD" = ODD
+  )
+
+
+ggvenn(x, denominator=dim(df_Y1)[1],
+  fill_color = c("#0073C2FF", "#EFC000FF", "#18A558", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+``````
+
+### Older
+````{r firstwaveold}
+df_Y1<-df1[which(df1$includey1=="Include" & df1$AgeCalculated > 11.0),]
+
+
+df_Y1$Dep=df_Y1$cDEPbriefCut10
+df_Y1$Anx<-df_Y1$cANXbriefCut10
+df_Y1$PTSD<-df_Y1$cPTSDtotCut12
+df_Y1$ODD<-df_Y1$pSDQEXTtotCut12
+
+Dep<-df_Y1$IDmerge[which(df_Y1$Dep==1)]
+Anx<-df_Y1$IDmerge[which(df_Y1$Anx==1)]
+PTSD<-df_Y1$IDmerge[which(df_Y1$PTSD==1)]
+ODD<-df_Y1$IDmerge[which(df_Y1$ODD==1)]
+
+
+x <- list(
+  Depression = Dep, 
+  Anxiety = Anx,
+  PTSD= PTSD,
+  "CD/ODD" = ODD
+  )
+
+
+ggvenn(x, denominator=dim(df_Y1)[1],
+  fill_color = c("#0073C2FF", "#EFC000FF", "#18A558", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+``````
+### Recent
+````{r firstwaverecent}
+df_Y1<-df1[which(df1$includey1=="Include" &  df1$TimeCatY1<8),]
+
+
+df_Y1$Dep=df_Y1$cDEPbriefCut10
+df_Y1$Anx<-df_Y1$cANXbriefCut10
+df_Y1$PTSD<-df_Y1$cPTSDtotCut12
+df_Y1$ODD<-df_Y1$pSDQEXTtotCut12
+
+Dep<-df_Y1$IDmerge[which(df_Y1$Dep==1)]
+Anx<-df_Y1$IDmerge[which(df_Y1$Anx==1)]
+PTSD<-df_Y1$IDmerge[which(df_Y1$PTSD==1)]
+ODD<-df_Y1$IDmerge[which(df_Y1$ODD==1)]
+
+
+x <- list(
+  Depression = Dep, 
+  Anxiety = Anx,
+  PTSD= PTSD,
+  "CD/ODD" = ODD
+  )
+
+
+ggvenn(x, denominator=dim(df_Y1)[1],
+  fill_color = c("#0073C2FF", "#EFC000FF", "#18A558", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+``````
+### Protacted
+````{r firstwaveprot}
+df_Y1<-df1[which(df1$includey1=="Include" &  df1$TimeCatY1>6),]
+
+
+df_Y1$Dep=df_Y1$cDEPbriefCut10
+df_Y1$Anx<-df_Y1$cANXbriefCut10
+df_Y1$PTSD<-df_Y1$cPTSDtotCut12
+df_Y1$ODD<-df_Y1$pSDQEXTtotCut12
+
+Dep<-df_Y1$IDmerge[which(df_Y1$Dep==1)]
+Anx<-df_Y1$IDmerge[which(df_Y1$Anx==1)]
+PTSD<-df_Y1$IDmerge[which(df_Y1$PTSD==1)]
+ODD<-df_Y1$IDmerge[which(df_Y1$ODD==1)]
+
+
+x <- list(
+  Depression = Dep, 
+  Anxiety = Anx,
+  PTSD= PTSD,
+  "CD/ODD" = ODD
+  )
+
+
+ggvenn(x, denominator=dim(df_Y1)[1],
+  fill_color = c("#0073C2FF", "#EFC000FF", "#18A558", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+``````
+## Follow-up 
+### Boys
+````{r secwaveboys}
+df_Y2<-df1[which(df1$includey2=="Include" & df1$cDem1=="Male"),]
+
+df_Y2$Dep=df_Y2$cDEPbriefCut10y2
+df_Y2$Anx<-df_Y2$cANXY2Cut12
+df_Y2$PTSD<-df_Y2$cPTSDtotCut12y2
+df_Y2$ODD<-df_Y2$pSDQEXTtotCut12y2
+
+
+
+Dep<-df_Y2$IDmerge[which(df_Y2$Dep==1)]
+Anx<-df_Y2$IDmerge[which(df_Y2$Anx==1)]
+PTSD<-df_Y2$IDmerge[which(df_Y2$PTSD==1)]
+ODD<-df_Y2$IDmerge[which(df_Y2$ODD==1)]
+
+
+x <- list(
+  Depression = Dep, 
+  Anxiety = Anx,
+  PTSD= PTSD,
+  "CD/ODD" = ODD
+  )
+ggvenn(x, denominator=dim(df_Y2)[1],
+  fill_color = c("#0073C2FF", "#EFC000FF", "#18A558", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+``````
+
+### Girls
+````{r secwavegirls}
+df_Y2<-df1[which(df1$includey2=="Include" & df1$cDem1=="Female"),]
+
+df_Y2$Dep=df_Y2$cDEPbriefCut10y2
+df_Y2$Anx<-df_Y2$cANXY2Cut12
+df_Y2$PTSD<-df_Y2$cPTSDtotCut12y2
+df_Y2$ODD<-df_Y2$pSDQEXTtotCut12y2
+
+
+
+Dep<-df_Y2$IDmerge[which(df_Y2$Dep==1)]
+Anx<-df_Y2$IDmerge[which(df_Y2$Anx==1)]
+PTSD<-df_Y2$IDmerge[which(df_Y2$PTSD==1)]
+ODD<-df_Y2$IDmerge[which(df_Y2$ODD==1)]
+
+
+x <- list(
+  Depression = Dep, 
+  Anxiety = Anx,
+  PTSD= PTSD,
+  "CD/ODD" = ODD
+  )
+ggvenn(x, denominator=dim(df_Y2)[1],
+  fill_color = c("#0073C2FF", "#EFC000FF", "#18A558", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+``````
+
+### Younger 
+````{r secwaveyoung}
+df_Y2<-df1[which(df1$includey2=="Include" & df1$AgeCalculated<=11.0),]
+
+df_Y2$Dep=df_Y2$cDEPbriefCut10y2
+df_Y2$Anx<-df_Y2$cANXY2Cut12
+df_Y2$PTSD<-df_Y2$cPTSDtotCut12y2
+df_Y2$ODD<-df_Y2$pSDQEXTtotCut12y2
+
+
+
+Dep<-df_Y2$IDmerge[which(df_Y2$Dep==1)]
+Anx<-df_Y2$IDmerge[which(df_Y2$Anx==1)]
+PTSD<-df_Y2$IDmerge[which(df_Y2$PTSD==1)]
+ODD<-df_Y2$IDmerge[which(df_Y2$ODD==1)]
+
+
+x <- list(
+  Depression = Dep, 
+  Anxiety = Anx,
+  PTSD= PTSD,
+  "CD/ODD" = ODD
+  )
+ggvenn(x, denominator=dim(df_Y2)[1],
+  fill_color = c("#0073C2FF", "#EFC000FF", "#18A558", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+``````
+
+### Older 
+````{r secwaveold}
+df_Y2<-df1[which(df1$includey2=="Include" & df1$AgeCalculated>11.0),]
+
+df_Y2$Dep=df_Y2$cDEPbriefCut10y2
+df_Y2$Anx<-df_Y2$cANXY2Cut12
+df_Y2$PTSD<-df_Y2$cPTSDtotCut12y2
+df_Y2$ODD<-df_Y2$pSDQEXTtotCut12y2
+
+
+
+Dep<-df_Y2$IDmerge[which(df_Y2$Dep==1)]
+Anx<-df_Y2$IDmerge[which(df_Y2$Anx==1)]
+PTSD<-df_Y2$IDmerge[which(df_Y2$PTSD==1)]
+ODD<-df_Y2$IDmerge[which(df_Y2$ODD==1)]
+
+
+x <- list(
+  Depression = Dep, 
+  Anxiety = Anx,
+  PTSD= PTSD,
+  "CD/ODD" = ODD
+  )
+ggvenn(x, denominator=dim(df_Y2)[1],
+  fill_color = c("#0073C2FF", "#EFC000FF", "#18A558", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+``````
+### Recent 
+````{r secwaverecent}
+df_Y2<-df1[which(df1$includey2=="Include" &  df1$TimeCatY1<8),]
+
+df_Y2$Dep=df_Y2$cDEPbriefCut10y2
+df_Y2$Anx<-df_Y2$cANXY2Cut12
+df_Y2$PTSD<-df_Y2$cPTSDtotCut12y2
+df_Y2$ODD<-df_Y2$pSDQEXTtotCut12y2
+
+
+
+Dep<-df_Y2$IDmerge[which(df_Y2$Dep==1)]
+Anx<-df_Y2$IDmerge[which(df_Y2$Anx==1)]
+PTSD<-df_Y2$IDmerge[which(df_Y2$PTSD==1)]
+ODD<-df_Y2$IDmerge[which(df_Y2$ODD==1)]
+
+
+x <- list(
+  Depression = Dep, 
+  Anxiety = Anx,
+  PTSD= PTSD,
+  "CD/ODD" = ODD
+  )
+ggvenn(x, denominator=dim(df_Y2)[1],
+  fill_color = c("#0073C2FF", "#EFC000FF", "#18A558", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+``````
+### Protacted
+````{r secwaveprot}
+df_Y2<-df1[which(df1$includey2=="Include" &  df1$TimeCatY1>6),]
+
+df_Y2$Dep=df_Y2$cDEPbriefCut10y2
+df_Y2$Anx<-df_Y2$cANXY2Cut12
+df_Y2$PTSD<-df_Y2$cPTSDtotCut12y2
+df_Y2$ODD<-df_Y2$pSDQEXTtotCut12y2
+
+
+
+Dep<-df_Y2$IDmerge[which(df_Y2$Dep==1)]
+Anx<-df_Y2$IDmerge[which(df_Y2$Anx==1)]
+PTSD<-df_Y2$IDmerge[which(df_Y2$PTSD==1)]
+ODD<-df_Y2$IDmerge[which(df_Y2$ODD==1)]
+
+
+x <- list(
+  Depression = Dep, 
+  Anxiety = Anx,
+  PTSD= PTSD,
+  "CD/ODD" = ODD
+  )
+ggvenn(x, denominator=dim(df_Y2)[1],
+  fill_color = c("#0073C2FF", "#EFC000FF", "#18A558", "#CD534CFF"),
+  stroke_size = 0.5, set_name_size = 4
+  )
+``````

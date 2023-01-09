@@ -1,0 +1,321 @@
+---
+title: "Environmental Predictors of mental symptoms in displaced Syrian refugee children living in ITS: Main and sensitivity analyses of the PREI subscales"
+author: "Claudinei Biazoli"
+date: "7/22/2021"
+output: 
+  html_document:
+  toc: true
+  toc_float: true
+---
+
+
+
+
+The complete set of main analysis and further comprehensive sensitivity analysis for the quality of environment predictors (pof mental health symptoms of Depression, Anxiety, PTSD and OC/ODD in Syrian refugee children living in ITS in Lebanon are presented. The main results are presented in the manuscript titled: "... "
+
+The full BIOPATH dataset stored in a SPSS .sav file was upload to R. The address of the file locally renamed as "BIOPATHEpidemio.sav" is:
+https://qmulprod-my.sharepoint.com/personal/btw735_qmul_ac_uk/Documents/OneDrive/BIOPATH/BIOPATH%20Data%20Analysis/Working%20datasets%20and%20analysis/Fiona%20McEwen_Epidemiology%20paper/Dataset/BIOPATH_Y1_and_Y2_Merged_v1.1_190720_CORRECTIONS_v1.23_MINIKID_13-07-2021.sav
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+
+require(Hmisc)
+library(lme4)
+library(car)
+library(plyr)
+library(dplyr)
+library(broom)
+
+
+res<-function(model_result,effect){  ### The predictor of interest must be the FIRST TERM on the model formula and also the "effect" 
+sm<-summary(model_result)
+am<-Anova(model_result)
+c<-confint(model_result)
+model<-as.character(sm$call)[2]
+coeff<-sm$coefficients[effect, 1]
+error<-sm$coefficients[effect, 2]
+v<-as.data.frame(VarCorr(model_result))
+effect_size<-coeff/(sum(v$vcov)^(1/2))
+pvalue<-am$`Pr(>Chisq)`[1]
+confidence_interval_2.5<-c[5,1]
+confidence_interval_97.5<-c[5,2]
+results<-c(model, coeff, error, confidence_interval_2.5, confidence_interval_97.5, effect_size, pvalue)
+return(results)
+}
+
+
+data<-spss.get("~/Downloads/BIOPATH_Y1 and Y2 Merged_v1.1_190720_CORRECTIONS_v1.27.sav")
+
+### Exclusions 
+N_total<-dim(data)[1]
+N_exc_base<-length(which(data$Excludeall=="Exclude all data and samples"))
+data<-data[which(data$Excludeall!="Exclude all data and samples"),]
+N_after_ex_base<-dim(data)[1]
+
+### Follow up 
+data_follow_up<-data[which(data$includey2=="Include"),]
+N_follow_up<- dim(data_follow_up)[1]
+
+### Clinical
+datac<-spss.get("~/Downloads/BIOPATHEpidemio.sav")
+data_clinical<-datac[which(datac$includemini=="Include"),]
+N_clinical<- dim(data_clinical)[1]v
+```````
+
+``````{r prepare, include=FALSE}
+
+df1<-data %>%
+  select(
+         IDmerge,
+         includey1,includey2,flagall,flagally2,
+         settpcodeINTc,
+         pAgeCalculated,
+         cDem1,
+         AgeCalculated,
+         TimeCatY1,
+         cDEPbrief,cDEPbriefy2,cANXbrief,cANXbriefy2,cPTSDtotr,cPTSDtoty2r,pSDQEXTtotc,pSDQEXTtoty2r,
+         pPREIliv, pPREIbas,pPREIhou,pPREIfam,pPREIser,pPREIcom, pPREIwor, pPREIlea,pPREImob,
+         pPREIlivy2, pPREIbasy2,pPREIhouy2,pPREIfamy2,pPREIsery2,pPREIcomy2, pPREIwory2,pPREIleay2,pPREImoby2
+       )
+
+df_clean<-df1[which(df1$includey1=="Include"),]
+
+df_Y1<-df_clean %>%
+  select(IDmerge,
+         settpcodeINTc,
+         pAgeCalculated,
+         cDem1,
+         AgeCalculated,
+         TimeCatY1,
+         cDEPbrief,cANXbrief,cPTSDtotr,pSDQEXTtotc,
+        pPREIliv, pPREIbas,pPREIhou,pPREIfam,pPREIfam,pPREIser,pPREIcom, pPREIwor, pPREIlea, pPREImob
+  )
+df_Y1$time<-rep("1",dim(df_Y1)[[1]])
+colnames(df_Y1)<-c("ID" , "settlement", "age_parent", "sex" , "age" , "duration_dislocation" ,"Dep", "Anx", "PTSD" , "Ext", "livelihood", "basic_needs", "housing", "family_environment", "services","social_environment", "work", "learning", "mobility", "time")
+
+
+df_clean_2<-df1[which(df1$includey2=="Include"),]
+df_Y2<-df_clean_2 %>%
+  select(IDmerge,
+         settpcodeINTc,
+         pAgeCalculated,
+         cDem1,
+         AgeCalculated,
+         TimeCatY1,
+         cDEPbriefy2,cANXbriefy2,cPTSDtoty2r,pSDQEXTtoty2r,
+         pPREIlivy2, pPREIbasy2,pPREIhouy2,pPREIfamy2,pPREIsery2,pPREIcomy2,pPREIwory2,pPREIleay2,pPREImoby2
+       )
+df_Y2$time<-rep("2",dim(df_Y2)[[1]])
+colnames(df_Y2)<-colnames(df_Y1)
+
+df<-rbind(df_Y1,df_Y2)
+
+df$ID<-as.factor(df$ID)
+df$time<-as.factor(df$time)
+df$settlement<-as.factor(df$settlement)
+df$duration_dislocation<-revalue(df$duration_dislocation, c("0-6 months ago" = 1, 
+                                   "6-12 months ago" =2,
+                                   "12-18 months ago" = 3,
+                                    "18-24 months ago" = 4,
+                                    "24-36 months ago"= 6,
+                                    "36-48 months ago"= 8,
+                                     ">48 months ago"= 10
+                                                ))
+df$duration_dislocation<-as.numeric(df$duration_dislocation)
+
+### Centralize and standartized outcomes
+df$Dep<-(df$Dep-mean(df$Dep,na.rm=T))/sd(df$Dep,na.rm=T)
+df$Anx<-(df$Anx-mean(df$Anx,na.rm=T))/sd(df$Anx,na.rm=T)
+df$PTSD<-(df$PTSD-mean(df$PTSD,na.rm=T))/sd(df$PTSD,na.rm=T)
+df$Ext<-(df$Ext-mean(df$Ext,na.rm=T))/sd(df$Ext,na.rm=T)
+
+``````
+
+### Depressive Symptoms
+``````{r Depression, echo=FALSE}
+
+
+m1<- lmer(Dep ~ basic_needs  + (1|settlement/ID) ,data=df)
+m2<- lmer(Dep ~ basic_needs + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m3<- lmer(Dep ~ basic_needs + livelihood + housing + family_environment + social_environment + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m4<- lmer(Dep ~ livelihood  + (1|settlement/ID) ,data=df)
+m5<- lmer(Dep ~ livelihood + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m6<- lmer(Dep ~ livelihood + basic_needs + housing + family_environment + social_environment + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m7<- lmer(Dep ~ housing  + (1|settlement/ID) ,data=df)
+m8<- lmer(Dep ~ housing + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m9<- lmer(Dep ~ housing + basic_needs + livelihood + family_environment + social_environment + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m10<- lmer(Dep ~ family_environment  + (1|settlement/ID) ,data=df)
+m11<- lmer(Dep ~ family_environment + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m12<-lmer(Dep ~ family_environment + basic_needs + livelihood + housing +  social_environment + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m13<-  lmer(Dep ~ services  + (1|settlement/ID) ,data=df)
+m14<- lmer(Dep ~ services + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m15<- lmer(Dep ~ social_environment  + (1|settlement/ID) ,data=df)
+m16<- lmer(Dep ~ social_environment + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m17<- lmer(Dep ~ social_environment +basic_needs + livelihood + housing + family_environment +  age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m18<- lmer(Dep ~ work  + (1|settlement/ID) ,data=df)
+m19<- lmer(Dep ~ work + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m20<- lmer(Dep ~ learning  + (1|settlement/ID) ,data=df)
+m21<- lmer(Dep ~ learning + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m22<- lmer(Dep ~ mobility  + (1|settlement/ID) ,data=df)
+m23<- lmer(Dep ~ mobility + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+
+
+Dep_res<-rbind(res(m1,"basic_needs"),res(m2,"basic_needs"),res(m3,"basic_needs"),
+               res(m4,"livelihood"),res(m5,"livelihood"),res(m6,"livelihood"),
+               res(m7,"housing"),res(m8,"housing"),res(m9,"housing"),
+               res(m10,"family_environment"), res(m11,"family_environment"),res(m12,"family_environment"),
+               res(m13,"services"), res(m14,"services"),
+               res(m15,"social_environment"),res(m16,"social_environment"),res(m17,"social_environment"),
+               res(m18,"work"), res(m19,"work"),
+               res(m20,"learning"),res(m21,"learning"),
+               res(m22,"mobility"),res(m23,"mobility"))
+
+colnames(Dep_res)<-c("model","Estimate", "Error", "CI - 2.5%", "CI - 97.5%", "Effect size", "p value")
+Dep_res
+```````````
+
+
+````{r writeDep, include=FALSE}
+write.csv(Dep_res, file = "~/Downloads/Dep_PREI.csv")
+```````
+
+
+### Anxiety Symptoms
+``````{r Anxiety, echo=FALSE}
+
+
+m1<- lmer(Anx ~ basic_needs  + (1|settlement/ID) ,data=df)
+m2<- lmer(Anx ~ basic_needs + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m3<- lmer(Anx ~ basic_needs + livelihood + housing + family_environment + social_environment + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m4<- lmer(Anx ~ livelihood  + (1|settlement/ID) ,data=df)
+m5<- lmer(Anx ~ livelihood + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m6<- lmer(Anx ~ livelihood + basic_needs + housing + family_environment + social_environment + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m7<- lmer(Anx ~ housing  + (1|settlement/ID) ,data=df)
+m8<- lmer(Anx ~ housing + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m9<- lmer(Anx ~ housing + basic_needs + livelihood + family_environment + social_environment + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m10<- lmer(Anx ~ family_environment  + (1|settlement/ID) ,data=df)
+m11<- lmer(Anx ~ family_environment + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m12<-lmer(Anx ~ family_environment + basic_needs + livelihood + housing +  social_environment + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m13<-  lmer(Anx ~ services  + (1|settlement/ID) ,data=df)
+m14<- lmer(Anx ~ services + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m15<- lmer(Anx ~ social_environment  + (1|settlement/ID) ,data=df)
+m16<- lmer(Anx ~ social_environment + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m17<- lmer(Anx ~ social_environment +basic_needs + livelihood + housing + family_environment +  age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m18<- lmer(Anx ~ work  + (1|settlement/ID) ,data=df)
+m19<- lmer(Anx ~ work + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m20<- lmer(Anx ~ learning  + (1|settlement/ID) ,data=df)
+m21<- lmer(Anx ~ learning + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m22<- lmer(Anx ~ mobility  + (1|settlement/ID) ,data=df)
+m23<- lmer(Anx ~ mobility + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+
+
+Anx_res<-rbind(res(m1,"basic_needs"),res(m2,"basic_needs"),res(m3,"basic_needs"),
+               res(m4,"livelihood"),res(m5,"livelihood"),res(m6,"livelihood"),
+               res(m7,"housing"),res(m8,"housing"),res(m9,"housing"),
+               res(m10,"family_environment"), res(m11,"family_environment"),res(m12,"family_environment"),
+               res(m13,"services"), res(m14,"services"),
+               res(m15,"social_environment"),res(m16,"social_environment"),res(m17,"social_environment"),
+               res(m18,"work"), res(m19,"work"),
+               res(m20,"learning"),res(m21,"learning"),
+               res(m22,"mobility"),res(m23,"mobility"))
+
+colnames(Anx_res)<-c("model","Estimate", "Error", "CI - 2.5%", "CI - 97.5%", "Effect size", "p value")
+Anx_res
+```````````
+
+````{r writeAnx, include=FALSE}
+write.csv(Anx_res, file = "~/Downloads/Anx_PREI.csv")
+```````
+
+### PTSD symptoms
+``````{r PTSD, echo=FALSE}
+
+m1<- lmer(PTSD ~ basic_needs  + (1|settlement/ID) ,data=df)
+m2<- lmer(PTSD ~ basic_needs + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m3<- lmer(PTSD ~ basic_needs + livelihood + housing + family_environment + social_environment + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m4<- lmer(PTSD ~ livelihood  + (1|settlement/ID) ,data=df)
+m5<- lmer(PTSD ~ livelihood + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m6<- lmer(PTSD ~ livelihood + basic_needs + housing + family_environment + social_environment + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m7<- lmer(PTSD ~ housing  + (1|settlement/ID) ,data=df)
+m8<- lmer(PTSD ~ housing + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m9<- lmer(PTSD ~ housing + basic_needs + livelihood + family_environment + social_environment + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m10<- lmer(PTSD ~ family_environment  + (1|settlement/ID) ,data=df)
+m11<- lmer(PTSD ~ family_environment + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m12<-lmer(PTSD ~ family_environment + basic_needs + livelihood + housing +  social_environment + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m13<-  lmer(PTSD ~ services  + (1|settlement/ID) ,data=df)
+m14<- lmer(PTSD ~ services + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m15<- lmer(PTSD ~ social_environment  + (1|settlement/ID) ,data=df)
+m16<- lmer(PTSD ~ social_environment + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m17<- lmer(PTSD ~ social_environment +basic_needs + livelihood + housing + family_environment +  age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m18<- lmer(PTSD ~ work  + (1|settlement/ID) ,data=df)
+m19<- lmer(PTSD ~ work + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m20<- lmer(PTSD ~ learning  + (1|settlement/ID) ,data=df)
+m21<- lmer(PTSD ~ learning + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m22<- lmer(PTSD ~ mobility  + (1|settlement/ID) ,data=df)
+m23<- lmer(PTSD ~ mobility + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+
+
+PTSD_res<-rbind(res(m1,"basic_needs"),res(m2,"basic_needs"),res(m3,"basic_needs"),
+               res(m4,"livelihood"),res(m5,"livelihood"),res(m6,"livelihood"),
+               res(m7,"housing"),res(m8,"housing"),res(m9,"housing"),
+               res(m10,"family_environment"), res(m11,"family_environment"),res(m12,"family_environment"),
+               res(m13,"services"), res(m14,"services"),
+               res(m15,"social_environment"),res(m16,"social_environment"),res(m17,"social_environment"),
+               res(m18,"work"), res(m19,"work"),
+               res(m20,"learning"),res(m21,"learning"),
+               res(m22,"mobility"),res(m23,"mobility"))
+
+colnames(PTSD_res)<-c("model","Estimate", "Error", "CI - 2.5%", "CI - 97.5%", "Effect size", "p value")
+PTSD_res
+```````````
+
+````{r writePTSD, include=FALSE}
+write.csv(PTSD_res, file = "~/Downloads/PTSD_PREI.csv")
+```````
+
+### Externalizing symptoms
+``````{r Ext, echo=FALSE}
+
+m1<- lmer(Ext ~ basic_needs  + (1|settlement/ID) ,data=df)
+m2<- lmer(Ext ~ basic_needs + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m3<- lmer(Ext ~ basic_needs + livelihood + housing + family_environment + social_environment + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m4<- lmer(Ext ~ livelihood  + (1|settlement/ID) ,data=df)
+m5<- lmer(Ext ~ livelihood + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m6<- lmer(Ext ~ livelihood + basic_needs + housing + family_environment + social_environment + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m7<- lmer(Ext ~ housing  + (1|settlement/ID) ,data=df)
+m8<- lmer(Ext ~ housing + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m9<- lmer(Ext ~ housing + basic_needs + livelihood + family_environment + social_environment + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m10<- lmer(Ext ~ family_environment  + (1|settlement/ID) ,data=df)
+m11<- lmer(Ext ~ family_environment + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m12<-lmer(Ext ~ family_environment + basic_needs + livelihood + housing +  social_environment + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m13<-  lmer(Ext ~ services  + (1|settlement/ID) ,data=df)
+m14<- lmer(Ext ~ services + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m15<- lmer(Ext ~ social_environment  + (1|settlement/ID) ,data=df)
+m16<- lmer(Ext ~ social_environment + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m17<- lmer(Ext ~ social_environment +basic_needs + livelihood + housing + family_environment +  age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m18<- lmer(Ext ~ work  + (1|settlement/ID) ,data=df)
+m19<- lmer(Ext ~ work + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m20<- lmer(Ext ~ learning  + (1|settlement/ID) ,data=df)
+m21<- lmer(Ext ~ learning + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m22<- lmer(Ext ~ mobility  + (1|settlement/ID) ,data=df)
+m23<- lmer(Ext ~ mobility + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+
+
+Ext_res<-rbind(res(m1,"basic_needs"),res(m2,"basic_needs"),res(m3,"basic_needs"),
+               res(m4,"livelihood"),res(m5,"livelihood"),res(m6,"livelihood"),
+               res(m7,"housing"),res(m8,"housing"),res(m9,"housing"),
+               res(m10,"family_environment"), res(m11,"family_environment"),res(m12,"family_environment"),
+               res(m13,"services"), res(m14,"services"),
+               res(m15,"social_environment"),res(m16,"social_environment"),res(m17,"social_environment"),
+               res(m18,"work"), res(m19,"work"),
+               res(m20,"learning"),res(m21,"learning"),
+               res(m22,"mobility"),res(m23,"mobility"))
+
+colnames(Ext_res)<-c("model","Estimate", "Error", "CI - 2.5%", "CI - 97.5%", "Effect size", "p value")
+Ext_res
+```````````
+
+````{r writeExt, include=FALSE}
+write.csv(Ext_res, file = "~/Downloads/Ext_PREI.csv")
+```````

@@ -1,0 +1,1564 @@
+---
+title: "Predictors of mental symptoms in displaced Syrian refugee children living in ITS: Main and sensitivity analyses of the BIOPATH dataset using Linear Mixed Models"
+author: "Claudinei Biazoli"
+date: "9/12/2022"
+output: html_document
+---
+
+The complete set of main analysis and further comprehensive sensitivity analysis for the predictors of mental health symptoms of Depression, Anxiety, PTSD and OC/ODD in Syrian refugee children living in ITS in Lebanon are presented. The main results are presented in the manuscript titled: "... "
+
+The full BIOPATH dataset stored in a SPSS .sav file was upload to R.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+require(Hmisc)
+library(lme4)
+library(car)
+library(plyr)
+library(dplyr)
+library(broom)
+
+res<-function(model_result,effect){  ### The predictor of interest must be the FIRST TERM on the model formula and also the "effect" 
+sm<-summary(model_result)
+am<-Anova(model_result)
+c<-confint(model_result)
+model<-as.character(sm$call)[2]
+coeff<-sm$coefficients[effect, 1]
+error<-sm$coefficients[effect, 2]
+v<-as.data.frame(VarCorr(model_result))
+effect_size<-coeff/(sum(v$vcov)^(1/2))
+pvalue<-am$`Pr(>Chisq)`[1]
+confidence_interval_2.5<-c[5,1]
+confidence_interval_97.5<-c[5,2]
+results<-c(model, coeff, error, confidence_interval_2.5, confidence_interval_97.5, effect_size, pvalue)
+return(results)
+}
+data<-spss.get("~/Downloads/BIOPATH_Y1 and Y2 Merged_v1.1_190720_CORRECTIONS_v1.27.sav")
+
+### Exclusions 
+N_total<-dim(data)[1]
+N_exc_base<-length(which(data$Excludeall=="Exclude all data and samples"))
+data<-data[which(data$Excludeall!="Exclude all data and samples"),]
+N_after_ex_base<-dim(data)[1]
+
+### Follow up 
+data_follow_up<-data[which(data$includey2=="Include"),]
+N_follow_up<- dim(data_follow_up)[1]
+
+### Clinical
+datac<-spss.get("~/Downloads/BIOPATHEpidemio.sav")
+data_clinical<-datac[which(datac$includemini=="Include"),]
+N_clinical<- dim(data_clinical)[1]
+```````
+
+
+``````{r prepare, include=FALSE}
+#Data was converted to the long format to run LMMs using the lme4 library. The variable encoding the duration of displacement was converted to a pseudo-continuous measure. 
+
+df1<-data %>%
+  select(
+         IDmerge,
+         includey1,includey2,flagall,flagally2,
+         settpcodeINTc,
+         pAgeCalculated,
+         cDem1,
+         AgeCalculated,
+         TimeCatY1,
+         cpWEQtot,
+         cDEPbrief,cDEPbriefy2,cANXbrief,cANXbriefy2,cPTSDtotr,cPTSDtoty2r,pSDQEXTtotc,pSDQEXTtoty2r,
+         cICASTtot,cICASTtoty2,pPREItotr,pPREItoty2r,     
+         pPTSDtotr,pPTSDtoty2r,pCESDtot,pCESDtoty2,pDASS21tot,pDASS21toty2,
+         cPCRctot,cPCRctoty2,pABIStot, pABIStoty2
+       )
+
+df_clean<-df1[which(df1$includey1=="Include"),]
+
+df_Y1<-df_clean %>%
+  select(IDmerge,
+         settpcodeINTc,
+         pAgeCalculated,
+         cDem1,
+         AgeCalculated,
+         TimeCatY1,
+         cpWEQtot,
+         cDEPbrief,cANXbrief,cPTSDtotr,pSDQEXTtotc,
+         cICASTtot,pPREItotr,
+         pPTSDtotr,pCESDtot,pDASS21tot,
+         cPCRctot, pABIStot
+  )
+df_Y1$time<-rep("1",dim(df_Y1)[[1]])
+colnames(df_Y1)<-c("ID" , "settlement", "age_parent", "sex" , "age" , "duration_dislocation" , "war_events" ,"Dep",    
+"Anx", "PTSD" , "Ext", "abuse" , "environment" , "PTSD_parent", "Depression_parent","Anxiety_parent", "conflict_family", "impulsivity_parent", "time")
+
+df_clean_2<-df1[which(df1$includey2=="Include"),]
+df_Y2<-df_clean_2 %>%
+  select(IDmerge,
+         settpcodeINTc,
+         pAgeCalculated,
+         cDem1,
+         AgeCalculated,
+         TimeCatY1,
+         cpWEQtot,
+         cDEPbriefy2,cANXbriefy2,cPTSDtoty2r,pSDQEXTtoty2r,
+         cICASTtoty2,pPREItoty2r,     
+         pPTSDtoty2r,pCESDtoty2,pDASS21toty2,
+         cPCRctoty2, pABIStoty2
+       )
+df_Y2$time<-rep("2",dim(df_Y2)[[1]])
+colnames(df_Y2)<-colnames(df_Y1)
+
+df<-rbind(df_Y1,df_Y2)
+
+df$ID<-as.factor(df$ID)
+df$time<-as.factor(df$time)
+df$settlement<-as.factor(df$settlement)
+df$duration_dislocation<-revalue(df$duration_dislocation, c("0-6 months ago" = 1, 
+                                   "6-12 months ago" =2,
+                                   "12-18 months ago" = 3,
+                                    "18-24 months ago" = 4,
+                                    "24-36 months ago"= 6,
+                                    "36-48 months ago"= 8,
+                                     ">48 months ago"= 10
+                                                ))
+df$duration_dislocation<-as.numeric(df$duration_dislocation)
+
+``````
+
+Main analyses and sensitivity analysis for each mental health symptoms scales and for the full longitudinal dataset, including cases with missing values, are presented bellow. Main analysis with effect sizes after adjusting for putative confounders are presented in Table 4 of the manuscript.
+
+## Depressive Symptoms    
+
+``````{r Depression, echo=FALSE}
+
+## Demographic predictors single models and adjusted for putative demographic confounders:
+m1<-  lmer(Dep ~ time + (1|settlement/ID) ,data=df)
+m2<-  lmer(Dep ~ age + (1|settlement/ID) ,data=df)
+m3<-  lmer(Dep ~ age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m4<-  lmer(Dep ~ sex + (1|settlement/ID) ,data=df)
+m5<-  lmer(Dep ~ sex + age + duration_dislocation + (1|settlement/ID) ,data=df)
+m6<-  lmer(Dep ~ duration_dislocation + (1|settlement/ID) ,data=df)
+m7<-  lmer(Dep ~ duration_dislocation + sex + age+ (1|settlement/ID) ,data=df)
+
+## War events single model and adjusted for age, sex and duration of displacement
+m8<-  lmer(Dep ~ war_events  + (1|settlement/ID) ,data=df)
+m9<-  lmer(Dep ~ war_events + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+
+## Refugee Environmental events single model and adjusted for age, sex and duration of displacement. Results for the subscales are presented in a separate file.
+m10<- lmer(Dep ~ environment  + (1|settlement/ID) ,data=df)
+m11<- lmer(Dep ~ environment + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+
+## Child-reported physical maltreatment single model and adjusted for age, sex and duration of displacement
+m12<- lmer(Dep ~ abuse  + (1|settlement/ID) ,data=df)
+m13<- lmer(Dep ~ abuse + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+
+## Child-caregiver conflict single model and adjusted for age, sex and duration of displacement
+m14<- lmer(Dep ~ conflict_family  + (1|settlement/ID) ,data=df)
+m15<- lmer(Dep ~ conflict_family + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+
+## Caregiver mental health symptoms single model; adjusted for caregiver age and duration of displacement; and multivariate models to evaluate the unique contribution of each class of symptoms (ajdusted for child age, caregiver age, duration of dislocation and all other caregiver mental health measures):
+m16<- lmer(Dep ~ Depression_parent  + (1|settlement/ID) ,data=df)
+m17<- lmer(Dep ~ Depression_parent  + age_parent + duration_dislocation + (1|settlement/ID) ,data=df)
+m18<- lmer(Dep ~ Depression_parent  + age + age_parent + duration_dislocation + PTSD_parent +Anxiety_parent + impulsivity_parent + (1|settlement/ID) ,data=df)
+m19<- lmer(Dep ~ Anxiety_parent  + (1|settlement/ID) ,data=df)
+m20<- lmer(Dep ~ Anxiety_parent  + age_parent + duration_dislocation + (1|settlement/ID) ,data=df)
+m21<- lmer(Dep ~ Anxiety_parent  + age + age_parent + duration_dislocation + Depression_parent + PTSD_parent + impulsivity_parent + (1|settlement/ID) ,data=df)
+m22<- lmer(Dep ~ PTSD_parent  + (1|settlement/ID) ,data=df)
+m23<- lmer(Dep ~ PTSD_parent  + age_parent + duration_dislocation + (1|settlement/ID) ,data=df)
+m24<- lmer(Dep ~ PTSD_parent  + age + age_parent + duration_dislocation + Depression_parent + Anxiety_parent + impulsivity_parent + (1|settlement/ID) ,data=df)
+m25<- lmer(Dep ~ impulsivity_parent  + (1|settlement/ID) ,data=df)
+m26<- lmer(Dep ~ impulsivity_parent  + age_parent + duration_dislocation + (1|settlement/ID) ,data=df)
+m27<- lmer(Dep ~ impulsivity_parent  + age + age_parent + duration_dislocation + Depression_parent + Anxiety_parent + PTSD_parent + (1|settlement/ID) ,data=df)
+
+
+Dep_res<-rbind(res(m1,"time2"),res(m2,"age"),res(m3,"age"),
+         res(m4,"sexFemale"),res(m5,"sexFemale"),
+         res(m6,"duration_dislocation"),res(m7,"duration_dislocation"),
+         res(m8,"war_events"),res(m9,"war_events"),
+         res(m10,"environment"),res(m11,"environment"),res(m12,"abuse"),res(m13,"abuse"),
+         res(m14,"conflict_family"),res(m15,"conflict_family"),
+         res(m16,"Depression_parent"), res(m17,"Depression_parent"),res(m18,"Depression_parent"),
+         res(m19,"Anxiety_parent"),res(m20,"Anxiety_parent"),res(m21,"Anxiety_parent"),
+         res(m22,"PTSD_parent"),res(m23,"PTSD_parent"),res(m24,"PTSD_parent"),
+         res(m25,"impulsivity_parent"),res(m26,"impulsivity_parent"),res(m27,"impulsivity_parent"))
+
+colnames(Dep_res)<-c("model","Estimate", "Error", "CI - 2.5%", "CI - 97.5%", "Effect size", "p value")
+Dep_res
+```````````
+
+````{r writeDep, include=FALSE}
+write.csv(Dep_res, file = "~/Downloads/Dep.csv")
+```````
+
+## Anxiety symptoms:
+
+``````{r Anxiety, echo=FALSE}
+
+## Demographic predictors single models and adjusted for putative demographic confounders:
+m1<-  lmer(Anx ~ time + (1|settlement/ID) ,data=df)
+m2<-  lmer(Anx ~ age + (1|settlement/ID) ,data=df)
+m3<-  lmer(Anx ~ age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m4<-  lmer(Anx ~ sex + (1|settlement/ID) ,data=df)
+m5<-  lmer(Anx ~ sex + age + duration_dislocation + (1|settlement/ID) ,data=df)
+m6<-  lmer(Anx ~ duration_dislocation + (1|settlement/ID) ,data=df)
+m7<-  lmer(Anx ~ duration_dislocation + sex + age+ (1|settlement/ID) ,data=df)
+
+## War events single model and adjusted for age, sex and duration of displacement
+m8<-  lmer(Anx ~ war_events  + (1|settlement/ID) ,data=df)
+m9<-  lmer(Anx ~ war_events + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+
+## Refugee Environmental events single model and adjusted for age, sex and duration of displacement. Results for the subscales are presented in a separate file.
+m10<- lmer(Anx ~ environment  + (1|settlement/ID) ,data=df)
+m11<- lmer(Anx ~ environment + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+
+## Child-reported physical maltreatment single model and adjusted for age, sex and duration of displacement
+m12<- lmer(Anx ~ abuse  + (1|settlement/ID) ,data=df)
+m13<- lmer(Anx ~ abuse + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+
+## Child-caregiver conflict single model and adjusted for age, sex and duration of displacement
+m14<- lmer(Anx ~ conflict_family  + (1|settlement/ID) ,data=df)
+m15<- lmer(Anx ~ conflict_family + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+
+
+## Caregiver mental health symptoms single model; adjusted for caregiver age and duration of displacement; and multivariate models to evaluate the unique contribution of each class of symptoms (ajdusted for child age, caregiver age, duration of dislocation and all other caregiver mental health measures):
+m16<- lmer(Anx ~ Depression_parent  + (1|settlement/ID) ,data=df)
+m17<- lmer(Anx ~ Depression_parent  + age_parent + duration_dislocation + (1|settlement/ID) ,data=df)
+m18<- lmer(Anx ~ Depression_parent  + age + age_parent + duration_dislocation + PTSD_parent +Anxiety_parent + impulsivity_parent + (1|settlement/ID) ,data=df)
+m19<- lmer(Anx ~ Anxiety_parent  + (1|settlement/ID) ,data=df)
+m20<- lmer(Anx ~ Anxiety_parent  + age_parent + duration_dislocation + (1|settlement/ID) ,data=df)
+m21<- lmer(Anx ~ Anxiety_parent  + age + age_parent + duration_dislocation + Depression_parent + PTSD_parent + impulsivity_parent + (1|settlement/ID) ,data=df)
+m22<- lmer(Anx ~ PTSD_parent  + (1|settlement/ID) ,data=df)
+m23<- lmer(Anx ~ PTSD_parent  + age_parent + duration_dislocation + (1|settlement/ID) ,data=df)
+m24<- lmer(Anx ~ PTSD_parent  + age + age_parent + duration_dislocation + Depression_parent + Anxiety_parent + impulsivity_parent + (1|settlement/ID) ,data=df)
+m25<- lmer(Anx ~ impulsivity_parent  + (1|settlement/ID) ,data=df)
+m26<- lmer(Anx ~ impulsivity_parent  + age_parent + duration_dislocation + (1|settlement/ID) ,data=df)
+m27<- lmer(Anx ~ impulsivity_parent  + age + age_parent + duration_dislocation + Depression_parent + Anxiety_parent + PTSD_parent + (1|settlement/ID) ,data=df)
+
+Anx_res<-rbind(res(m1,"time2"),res(m2,"age"),res(m3,"age"),
+         res(m4,"sexFemale"),res(m5,"sexFemale"),
+         res(m6,"duration_dislocation"),res(m7,"duration_dislocation"),
+         res(m8,"war_events"),res(m9,"war_events"),
+         res(m10,"environment"),res(m11,"environment"),res(m12,"abuse"),res(m13,"abuse"),
+         res(m14,"conflict_family"),res(m15,"conflict_family"),
+         res(m16,"Depression_parent"), res(m17,"Depression_parent"),res(m18,"Depression_parent"),
+         res(m19,"Anxiety_parent"),res(m20,"Anxiety_parent"),res(m21,"Anxiety_parent"),
+         res(m22,"PTSD_parent"),res(m23,"PTSD_parent"),res(m24,"PTSD_parent"),
+         res(m25,"impulsivity_parent"),res(m26,"impulsivity_parent"),res(m27,"impulsivity_parent"))
+
+colnames(Anx_res)<-c("model","Estimate", "Error", "CI - 2.5%", "CI - 97.5%", "Effect size", "p value")
+Anx_res
+```````````
+
+````{r writeAnx, include=FALSE}
+write.csv(Anx_res, file = "~/Downloads/Anx.csv")
+```````
+
+## PTSD symptoms:
+
+``````{r PTSD, echo=FALSE}
+
+## Demographic predictors single models and adjusted for putative demographic confounders:
+m1<-  lmer(PTSD ~ time + (1|settlement/ID) ,data=df)
+m2<-  lmer(PTSD ~ age + (1|settlement/ID) ,data=df)
+m3<-  lmer(PTSD ~ age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m4<-  lmer(PTSD ~ sex + (1|settlement/ID) ,data=df)
+m5<-  lmer(PTSD ~ sex + age + duration_dislocation + (1|settlement/ID) ,data=df)
+m6<-  lmer(PTSD ~ duration_dislocation + (1|settlement/ID) ,data=df)
+m7<-  lmer(PTSD ~ duration_dislocation + sex + age+ (1|settlement/ID) ,data=df)
+
+## War events single model and adjusted for age, sex and duration of displacement
+m8<-  lmer(PTSD ~ war_events  + (1|settlement/ID) ,data=df)
+m9<-  lmer(PTSD ~ war_events + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+
+## Refugee Environmental events single model and adjusted for age, sex and duration of displacement. Results for the subscales are presented in a separate file.
+m10<- lmer(PTSD ~ environment  + (1|settlement/ID) ,data=df)
+m11<- lmer(PTSD ~ environment + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+
+## Child-reported physical maltreatment single model and adjusted for age, sex and duration of displacement
+m12<- lmer(PTSD ~ abuse  + (1|settlement/ID) ,data=df)
+m13<- lmer(PTSD ~ abuse + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+
+## Child-caregiver conflict single model and adjusted for age, sex and duration of displacement
+m14<- lmer(PTSD ~ conflict_family  + (1|settlement/ID) ,data=df)
+m15<- lmer(PTSD ~ conflict_family + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+
+## Caregiver mental health symptoms single model; adjusted for caregiver age and duration of displacement; and multivariate models to evaluate the unique contribution of each class of symptoms (ajdusted for child age, caregiver age, duration of dislocation and all other caregiver mental health measures):
+m16<- lmer(PTSD ~ Depression_parent  + (1|settlement/ID) ,data=df)
+m17<- lmer(PTSD ~ Depression_parent  + age_parent + duration_dislocation + (1|settlement/ID) ,data=df)
+m18<- lmer(PTSD ~ Depression_parent  + age + age_parent + duration_dislocation + PTSD_parent +Anxiety_parent + impulsivity_parent + (1|settlement/ID) ,data=df)
+m19<- lmer(PTSD ~ Anxiety_parent  + (1|settlement/ID) ,data=df)
+m20<- lmer(PTSD ~ Anxiety_parent  + age_parent + duration_dislocation + (1|settlement/ID) ,data=df)
+m21<- lmer(PTSD ~ Anxiety_parent  + age + age_parent + duration_dislocation + Depression_parent + PTSD_parent + impulsivity_parent + (1|settlement/ID) ,data=df)
+m22<- lmer(PTSD ~ PTSD_parent  + (1|settlement/ID) ,data=df)
+m23<- lmer(PTSD ~ PTSD_parent  + age_parent + duration_dislocation + (1|settlement/ID) ,data=df)
+m24<- lmer(PTSD ~ PTSD_parent  + age + age_parent + duration_dislocation + Depression_parent + Anxiety_parent + impulsivity_parent + (1|settlement/ID) ,data=df)
+m25<- lmer(PTSD ~ impulsivity_parent  + (1|settlement/ID) ,data=df)
+m26<- lmer(PTSD ~ impulsivity_parent  + age_parent + duration_dislocation + (1|settlement/ID) ,data=df)
+m27<- lmer(PTSD ~ impulsivity_parent  + age + age_parent + duration_dislocation + Depression_parent + Anxiety_parent + PTSD_parent + (1|settlement/ID) ,data=df)
+
+PTSD_res<-rbind(res(m1,"time2"),res(m2,"age"),res(m3,"age"),
+         res(m4,"sexFemale"),res(m5,"sexFemale"),
+         res(m6,"duration_dislocation"),res(m7,"duration_dislocation"),
+         res(m8,"war_events"),res(m9,"war_events"),
+         res(m10,"environment"),res(m11,"environment"),res(m12,"abuse"),res(m13,"abuse"),
+         res(m14,"conflict_family"),res(m15,"conflict_family"),
+         res(m16,"Depression_parent"), res(m17,"Depression_parent"),res(m18,"Depression_parent"),
+         res(m19,"Anxiety_parent"),res(m20,"Anxiety_parent"),res(m21,"Anxiety_parent"),
+         res(m22,"PTSD_parent"),res(m23,"PTSD_parent"),res(m24,"PTSD_parent"),
+         res(m25,"impulsivity_parent"),res(m26,"impulsivity_parent"),res(m27,"impulsivity_parent"))
+
+colnames(PTSD_res)<-c("model","Estimate", "Error", "CI - 2.5%", "CI - 97.5%", "Effect size", "p value")
+PTSD_res
+```````````
+
+````{r writePTSD, include=FALSE}
+write.csv(PTSD_res, file = "~/Downloads/PTSD.csv")
+```````
+
+## Externalizing symptoms: 
+``````{r Externalizing, echo=FALSE}
+
+## Demographic predictors single models and adjusted for putative demographic confounders:
+m1<-  lmer(Ext ~ time + (1|settlement/ID) ,data=df)
+m2<-  lmer(Ext ~ age + (1|settlement/ID) ,data=df)
+m3<-  lmer(Ext ~ age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+m4<-  lmer(Ext ~ sex + (1|settlement/ID) ,data=df)
+m5<-  lmer(Ext ~ sex + age + duration_dislocation + (1|settlement/ID) ,data=df)
+m6<-  lmer(Ext ~ duration_dislocation + (1|settlement/ID) ,data=df)
+m7<-  lmer(Ext ~ duration_dislocation + sex + age+ (1|settlement/ID) ,data=df)
+
+## War events single model and adjusted for age, sex and duration of displacement
+m8<-  lmer(Ext ~ war_events  + (1|settlement/ID) ,data=df)
+m9<-  lmer(Ext ~ war_events + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+
+## Refugee Environmental events single model and adjusted for age, sex and duration of displacement. Results for the subscales are presented in a separate file.
+m10<- lmer(Ext ~ environment  + (1|settlement/ID) ,data=df)
+m11<- lmer(Ext ~ environment + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+
+## Child-reported physical maltreatment single model and adjusted for age, sex and duration of displacement
+m12<- lmer(Ext ~ abuse  + (1|settlement/ID) ,data=df)
+m13<- lmer(Ext ~ abuse + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+
+## Child-caregiver conflict single model and adjusted for age, sex and duration of displacement
+m14<- lmer(Ext ~ conflict_family  + (1|settlement/ID) ,data=df)
+m15<- lmer(Ext ~ conflict_family + age + sex + duration_dislocation + (1|settlement/ID) ,data=df)
+
+## Caregiver mental health symptoms single model; adjusted for caregiver age and duration of displacement; and multivariate models to evaluate the unique contribution of each class of symptoms (ajdusted for child age, caregiver age, duration of dislocation and all other caregiver mental health measures):
+m16<- lmer(Ext ~ Depression_parent  + (1|settlement/ID) ,data=df)
+m17<- lmer(Ext ~ Depression_parent  + age_parent + duration_dislocation + (1|settlement/ID) ,data=df)
+m18<- lmer(Ext ~ Depression_parent  + age + age_parent + duration_dislocation + PTSD_parent +Anxiety_parent + impulsivity_parent + (1|settlement/ID) ,data=df)
+m19<- lmer(Ext ~ Anxiety_parent  + (1|settlement/ID) ,data=df)
+m20<- lmer(Ext ~ Anxiety_parent  + age_parent + duration_dislocation + (1|settlement/ID) ,data=df)
+m21<- lmer(Ext ~ Anxiety_parent  + age + age_parent + duration_dislocation + Depression_parent + PTSD_parent + impulsivity_parent + (1|settlement/ID) ,data=df)
+m22<- lmer(Ext ~ PTSD_parent  + (1|settlement/ID) ,data=df)
+m23<- lmer(Ext ~ PTSD_parent  + age_parent + duration_dislocation + (1|settlement/ID) ,data=df)
+m24<- lmer(Ext ~ PTSD_parent  + age + age_parent + duration_dislocation + Depression_parent + Anxiety_parent + impulsivity_parent + (1|settlement/ID) ,data=df)
+m25<- lmer(Ext ~ impulsivity_parent  + (1|settlement/ID) ,data=df)
+m26<- lmer(Ext ~ impulsivity_parent  + age_parent + duration_dislocation + (1|settlement/ID) ,data=df)
+m27<- lmer(Ext ~ impulsivity_parent  + age + age_parent + duration_dislocation + Depression_parent + Anxiety_parent + PTSD_parent + (1|settlement/ID) ,data=df)
+
+Ext_res<-rbind(res(m1,"time2"),res(m2,"age"),res(m3,"age"),
+         res(m4,"sexFemale"),res(m5,"sexFemale"),
+         res(m6,"duration_dislocation"),res(m7,"duration_dislocation"),
+         res(m8,"war_events"),res(m9,"war_events"),
+         res(m10,"environment"),res(m11,"environment"),res(m12,"abuse"),res(m13,"abuse"),
+         res(m14,"conflict_family"),res(m15,"conflict_family"),
+         res(m16,"Depression_parent"), res(m17,"Depression_parent"),res(m18,"Depression_parent"),
+         res(m19,"Anxiety_parent"),res(m20,"Anxiety_parent"),res(m21,"Anxiety_parent"),
+         res(m22,"PTSD_parent"),res(m23,"PTSD_parent"),res(m24,"PTSD_parent"),
+         res(m25,"impulsivity_parent"),res(m26,"impulsivity_parent"),res(m27,"impulsivity_parent"))
+
+colnames(Ext_res)<-c("model","Estimate", "Error", "CI - 2.5%", "CI - 97.5%", "Effect size", "p value")
+Ext_res
+```````````
+
+````{r writeExt, include=FALSE}
+write.csv(Ext_res, file = "~/Downloads/Ext.csv")
+```````
+
+## Sensitivity Analysis - only cases with follow-up data
+
+The results for sensitivity analyses including only the cases (N=1007) with one-year follow-up data are presented bellow. 
+`````{r onlysecondwavecases, include=FALSE}
+
+df_clean<-df1[which(df1$includey2=="Include"),]
+
+df_Y1<-df_clean %>%
+  select(IDmerge,
+         settpcodeINTc,
+         pAgeCalculated,
+         cDem1,
+         AgeCalculated,
+         TimeCatY1,
+         cpWEQtot,
+         cDEPbrief,cANXbrief,cPTSDtotr,pSDQEXTtotc,
+         cICASTtot,pPREItotr,
+         pPTSDtotr,pCESDtot,pDASS21tot,
+         cPCRctot, pABIStot
+  )
+df_Y1$time<-rep("1",dim(df_Y1)[[1]])
+colnames(df_Y1)<-c("ID" , "settlement", "age_parent", "sex" , "age" , "duration_dislocation" , "war_events" ,"Dep",    
+"Anx", "PTSD" , "Ext", "abuse" , "environment" , "PTSD_parent", "Depression_parent","Anxiety_parent", "conflict_family","impulsivity_parent" ,"time")
+
+df_clean_2<-df1[which(df1$includey2=="Include"),]
+df_Y2<-df_clean_2 %>%
+  select(IDmerge,
+         settpcodeINTc,
+         pAgeCalculated,
+         cDem1,
+         AgeCalculated,
+         TimeCatY1,
+         cpWEQtot,
+         cDEPbriefy2,cANXbriefy2,cPTSDtoty2r,pSDQEXTtoty2r,
+         cICASTtoty2,pPREItoty2r,      #### PARENTAL PHYSICAL ABUSE (check!!!)
+         pPTSDtoty2r,pCESDtoty2,pDASS21toty2,
+         cPCRctoty2, pABIStoty2
+       )
+df_Y2$time<-rep("2",dim(df_Y2)[[1]])
+colnames(df_Y2)<-colnames(df_Y1)
+
+df<-rbind(df_Y1,df_Y2)
+
+df$ID<-as.factor(df$ID)
+df$time<-as.factor(df$time)
+df$settlement<-as.factor(df$settlement)
+df$duration_dislocation<-revalue(df$duration_dislocation, c("0-6 months ago" = 1, 
+                                   "6-12 months ago" =2,
+                                   "12-18 months ago" = 3,
+                                    "18-24 months ago" = 4,
+                                    "24-36 months ago"= 6,
+                                    "36-48 months ago"= 8,
+                                     ">48 months ago"= 10
+                                                ))
+df$duration_dislocation<-as.numeric(df$duration_dislocation)
+``````````
+### Depressive symptoms:
+``````{r Depression, echo=FALSE}
+```````
+
+````{r writeDepwave2, include=FALSE}
+write.csv(Dep_res, file = "~/Downloads/Dep_2waves.csv")
+``````
+### Anxiety symptoms: 
+`````{r Anxiety, echo=FALSE}
+````````
+
+````{r writeAnxwave2, include=FALSE}
+write.csv(Anx_res, file = "~/Downloads/Anx_2waves.csv")
+```````
+### PTSD symptoms:
+``````{r PTSD, echo=FALSE}
+`````````
+
+````{r writePTSDwave2, include=FALSE}
+write.csv(PTSD_res, file = "~/Downloads/PTSD_2waves.csv")
+````````````
+### CD/ODD symptoms;
+``````{r Externalizing, echo=FALSE}
+````````
+
+````{r writeExtwave2, include=FALSE}
+write.csv(Ext_res, file = "~/Downloads/Ext_2waves.csv")
+`````````
+
+## Sensitivity analysis: Complete cases
+
+
+The results for sensitivity analyses including only the complete cases (with no missing value for any variable) are presented bellow. 
+
+```````{r completedcases, include=FALSE}
+
+df_clean<-df1[which(df1$includey2=="Include"),]
+exclude<-which((df_clean$flagall=="Repeat analyses excluding case"))
+df_clean<-df_clean[-c(exclude),]
+exclude<-which((df_clean$flagally2=="Repeat analyses excluding case"))
+df_clean<-df_clean[-c(exclude),]
+
+df_Y1<-df_clean %>%
+  select(IDmerge,
+         settpcodeINTc,
+         pAgeCalculated,
+         cDem1,
+         AgeCalculated,
+         TimeCatY1,
+         cpWEQtot,
+         cDEPbrief,cANXbrief,cPTSDtotr,pSDQEXTtotc,
+         cICASTtot,pPREItotr,
+         pPTSDtotr,pCESDtot,pDASS21tot,
+         cPCRctot, pABIStot
+  )
+df_Y1$time<-rep("1",dim(df_Y1)[[1]])
+colnames(df_Y1)<-c("ID" , "settlement", "age_parent", "sex" , "age" , "duration_dislocation" , "war_events" ,"Dep",    
+"Anx", "PTSD" , "Ext", "abuse" , "environment" , "PTSD_parent", "Depression_parent","Anxiety_parent", "conflict_family","impulsivity_parent" ,"time")
+
+df_Y2<-df_clean %>%
+  select(IDmerge,
+         settpcodeINTc,
+         pAgeCalculated,
+         cDem1,
+         AgeCalculated,
+         TimeCatY1,
+         cpWEQtot,
+         cDEPbriefy2,cANXbriefy2,cPTSDtoty2r,pSDQEXTtoty2r,
+         cICASTtoty2,pPREItoty2r,      #### PARENTAL PHYSICAL ABUSE (check!!!)
+         pPTSDtoty2r,pCESDtoty2,pDASS21toty2,
+         cPCRctoty2, pABIStoty2
+       )
+df_Y2$time<-rep("2",dim(df_Y2)[[1]])
+colnames(df_Y2)<-colnames(df_Y1)
+
+df<-rbind(df_Y1,df_Y2)
+
+df$ID<-as.factor(df$ID)
+df$time<-as.factor(df$time)
+df$settlement<-as.factor(df$settlement)
+df$duration_dislocation<-revalue(df$duration_dislocation, c("0-6 months ago" = 1, 
+                                   "6-12 months ago" =2,
+                                   "12-18 months ago" = 3,
+                                    "18-24 months ago" = 4,
+                                    "24-36 months ago"= 6,
+                                    "36-48 months ago"= 8,
+                                     ">48 months ago"= 10
+                                                ))
+df$duration_dislocation<-as.numeric(df$duration_dislocation)
+
+df<-df[complete.cases(df),]
+````````````````
+
+### Depressive symptoms
+``````{r Depression, echo=FALSE}
+```````
+
+````{r writecomp, include=FALSE}
+write.csv(Dep_res, file = "~/Downloads/Dep_compcases.csv")
+``````
+### Anxiety symptoms
+`````{r Anxiety, echo=FALSE}
+````````
+
+````{r writeAnxcomp, include=FALSE}
+write.csv(Anx_res, file = "~/Downloads/Anx_compcases.csv")
+```````
+### PTSD symptoms
+``````{r PTSD, echo=FALSE}
+`````````
+
+````{r writePTSDcomp, include=FALSE}
+write.csv(PTSD_res, file = "~/Downloads/PTSD_compcases.csv")
+````````````
+### Externalizing symptoms
+``````{r Externalizing, echo=FALSE}
+````````
+
+````{r writeExtcomp, include=FALSE}
+write.csv(Ext_res, file = "~/Downloads/Ext_compcases.csv")
+`````````
+
+
+## Sensitivity analysis : subgroups by sex
+
+###  Female (N=840): 
+``````{r girls, include=FALSE}
+df1<-data %>%
+  select(
+         IDmerge,
+         includey1,includey2,flagall,flagally2,
+         settpcodeINTc,
+         pAgeCalculated,
+         cDem1,
+         AgeCalculated,
+         TimeCatY1,
+         cpWEQtot,
+         cDEPbrief,cDEPbriefy2,cANXbrief,cANXbriefy2,cPTSDtotr,cPTSDtoty2r,pSDQEXTtotc,pSDQEXTtoty2r,
+         cICASTtot,cICASTtoty2,pPREItotr,pPREItoty2r,     
+         pPTSDtotr,pPTSDtoty2r,pCESDtot,pCESDtoty2,pDASS21tot,pDASS21toty2,
+         cPCRctot,cPCRctoty2,pABIStot, pABIStoty2
+       )
+
+df_clean<-df1[which(df1$includey1=="Include" & df1$cDem1=="Female"),]
+
+df_Y1<-df_clean %>%
+  select(IDmerge,
+         settpcodeINTc,
+         pAgeCalculated,
+         cDem1,
+         AgeCalculated,
+         TimeCatY1,
+         cpWEQtot,
+         cDEPbrief,cANXbrief,cPTSDtotr,pSDQEXTtotc,
+         cICASTtot,pPREItotr,
+         pPTSDtotr,pCESDtot,pDASS21tot,
+         cPCRctot, pABIStot
+  )
+df_Y1$time<-rep("1",dim(df_Y1)[[1]])
+colnames(df_Y1)<-c("ID" , "settlement", "age_parent", "sex" , "age" , "duration_dislocation" , "war_events" ,"Dep",    
+"Anx", "PTSD" , "Ext", "abuse" , "environment" , "PTSD_parent", "Depression_parent","Anxiety_parent", "conflict_family", "impulsivity_parent", "time")
+
+df_clean_2<-df1[which(df1$includey2=="Include"),]
+df_Y2<-df_clean_2 %>%
+  select(IDmerge,
+         settpcodeINTc,
+         pAgeCalculated,
+         cDem1,
+         AgeCalculated,
+         TimeCatY1,
+         cpWEQtot,
+         cDEPbriefy2,cANXbriefy2,cPTSDtoty2r,pSDQEXTtoty2r,
+         cICASTtoty2,pPREItoty2r,     
+         pPTSDtoty2r,pCESDtoty2,pDASS21toty2,
+         cPCRctoty2, pABIStoty2
+       )
+df_Y2$time<-rep("2",dim(df_Y2)[[1]])
+colnames(df_Y2)<-colnames(df_Y1)
+
+df<-rbind(df_Y1,df_Y2)
+
+df$ID<-as.factor(df$ID)
+df$time<-as.factor(df$time)
+df$settlement<-as.factor(df$settlement)
+df$duration_dislocation<-revalue(df$duration_dislocation, c("0-6 months ago" = 1, 
+                                   "6-12 months ago" =2,
+                                   "12-18 months ago" = 3,
+                                    "18-24 months ago" = 4,
+                                    "24-36 months ago"= 6,
+                                    "36-48 months ago"= 8,
+                                     ">48 months ago"= 10
+                                                ))
+df$duration_dislocation<-as.numeric(df$duration_dislocation)
+``````````
+
+#### Depressive symptoms
+```{r DepSex, echo=FALSE}
+## Demographic predictors single models and adjusted for putative demographic confounders:
+m1<-  lmer(Dep ~ time + (1|settlement/ID) ,data=df)
+m2<-  lmer(Dep ~ age + (1|settlement/ID) ,data=df)
+m3<-  lmer(Dep ~ age + duration_dislocation + (1|settlement/ID) ,data=df)
+m4<-  lmer(Dep ~ duration_dislocation + (1|settlement/ID) ,data=df)
+m5<-  lmer(Dep ~ duration_dislocation + age + (1|settlement/ID) ,data=df)
+
+## War events single model and adjusted for age, sex and duration of displacement
+m6<-  lmer(Dep ~ war_events  + (1|settlement/ID) ,data=df)
+m7<-  lmer(Dep ~ war_events + age + duration_dislocation + (1|settlement/ID) ,data=df)
+
+## Refugee Environmental events single model and adjusted for age, sex and duration of displacement. Results for the subscales are presented in a separate file.
+m8<- lmer(Dep ~ environment  + (1|settlement/ID) ,data=df)
+m9<- lmer(Dep ~ environment + age + duration_dislocation + (1|settlement/ID) ,data=df)
+
+## Child-reported physical maltreatment single model and adjusted for age, sex and duration of displacement
+m10<- lmer(Dep ~ abuse  + (1|settlement/ID) ,data=df)
+m11<- lmer(Dep ~ abuse + age  + duration_dislocation + (1|settlement/ID) ,data=df)
+
+## Child-caregiver conflict single model and adjusted for age, sex and duration of displacement
+m12<- lmer(Dep ~ conflict_family  + (1|settlement/ID) ,data=df)
+m13<- lmer(Dep ~ conflict_family + age  + duration_dislocation + (1|settlement/ID) ,data=df)
+
+## Caregiver mental health symptoms single model; adjusted for caregiver age and duration of displacement; and multivariate models to evaluate the unique contribution of each class of symptoms (ajdusted for child age, caregiver age, duration of dislocation and all other caregiver mental health measures):
+m14<- lmer(Dep ~ Depression_parent  + (1|settlement/ID) ,data=df)
+m15<- lmer(Dep ~ Depression_parent  + age_parent + duration_dislocation + (1|settlement/ID) ,data=df)
+m16<- lmer(Dep ~ Depression_parent  + age + age_parent + duration_dislocation + PTSD_parent +Anxiety_parent + impulsivity_parent + (1|settlement/ID) ,data=df)
+m17<- lmer(Dep ~ Anxiety_parent  + (1|settlement/ID) ,data=df)
+m18<- lmer(Dep ~ Anxiety_parent  + age_parent + duration_dislocation + (1|settlement/ID) ,data=df)
+m19<- lmer(Dep ~ Anxiety_parent  + age + age_parent + duration_dislocation + Depression_parent + PTSD_parent + impulsivity_parent + (1|settlement/ID) ,data=df)
+m20<- lmer(Dep ~ PTSD_parent  + (1|settlement/ID) ,data=df)
+m21<- lmer(Dep ~ PTSD_parent  + age_parent + duration_dislocation + (1|settlement/ID) ,data=df)
+m22<- lmer(Dep ~ PTSD_parent  + age + age_parent + duration_dislocation + Depression_parent + Anxiety_parent + impulsivity_parent + (1|settlement/ID) ,data=df)
+m23<- lmer(Dep ~ impulsivity_parent  + (1|settlement/ID) ,data=df)
+m24<- lmer(Dep ~ impulsivity_parent  + age_parent + duration_dislocation + (1|settlement/ID) ,data=df)
+m25<- lmer(Dep ~ impulsivity_parent  + age + age_parent + duration_dislocation + Depression_parent + Anxiety_parent + PTSD_parent + (1|settlement/ID) ,data=df)
+
+Dep_res<-rbind(res(m1,"time2"),res(m2,"age"),res(m3,"age"),
+         res(m4,"duration_dislocation"),res(m5,"duration_dislocation"),
+         res(m6,"war_events"),res(m7,"war_events"),
+         res(m8,"environment"),res(m9,"environment"),res(m10,"abuse"),res(m11,"abuse"),
+         res(m12,"conflict_family"),res(m13,"conflict_family"),
+         res(m14,"Depression_parent"), res(m15,"Depression_parent"),res(m16,"Depression_parent"),
+         res(m17,"Anxiety_parent"),res(m18,"Anxiety_parent"),res(m19,"Anxiety_parent"),
+         res(m20,"PTSD_parent"),res(m21,"PTSD_parent"),res(m22,"PTSD_parent"),
+         res(m23,"impulsivity_parent"),res(m24,"impulsivity_parent"),res(m25,"impulsivity_parent"))
+
+colnames(Dep_res)<-c("model","Estimate", "Error", "CI - 2.5%", "CI - 97.5%", "Effect size", "p value")
+Dep_res
+```````````
+
+````{r writeDepGirls, include=FALSE}
+write.csv(Dep_res, file = "~/Downloads/Dep_girls.csv")
+`````````
+
+#### Anxiety symptoms
+```{r AnxSex, echo=FALSE}
+## Demographic predictors single models and adjusted for putative demographic confounders:
+m1<-  lmer(Anx ~ time + (1|settlement/ID) ,data=df)
+m2<-  lmer(Anx ~ age + (1|settlement/ID) ,data=df)
+m3<-  lmer(Anx ~ age + duration_dislocation + (1|settlement/ID) ,data=df)
+m4<-  lmer(Anx ~ duration_dislocation + (1|settlement/ID) ,data=df)
+m5<-  lmer(Anx ~ duration_dislocation + age + (1|settlement/ID) ,data=df)
+
+## War events single model and adjusted for age, sex and duration of displacement
+m6<-  lmer(Anx ~ war_events  + (1|settlement/ID) ,data=df)
+m7<-  lmer(Anx ~ war_events + age + duration_dislocation + (1|settlement/ID) ,data=df)
+
+## Refugee Environmental events single model and adjusted for age, sex and duration of displacement. Results for the subscales are presented in a separate file.
+m8<- lmer(Anx ~ environment  + (1|settlement/ID) ,data=df)
+m9<- lmer(Anx ~ environment + age + duration_dislocation + (1|settlement/ID) ,data=df)
+
+## Child-reported physical maltreatment single model and adjusted for age, sex and duration of displacement
+m10<- lmer(Anx ~ abuse  + (1|settlement/ID) ,data=df)
+m11<- lmer(Anx ~ abuse + age  + duration_dislocation + (1|settlement/ID) ,data=df)
+
+## Child-caregiver conflict single model and adjusted for age, sex and duration of displacement
+m12<- lmer(Anx ~ conflict_family  + (1|settlement/ID) ,data=df)
+m13<- lmer(Anx ~ conflict_family + age  + duration_dislocation + (1|settlement/ID) ,data=df)
+
+## Caregiver mental health symptoms single model; adjusted for caregiver age and duration of displacement; and multivariate models to evaluate the unique contribution of each class of symptoms (ajdusted for child age, caregiver age, duration of dislocation and all other caregiver mental health measures):
+m14<- lmer(Anx ~ Depression_parent  + (1|settlement/ID) ,data=df)
+m15<- lmer(Anx ~ Depression_parent  + age_parent + duration_dislocation + (1|settlement/ID) ,data=df)
+m16<- lmer(Anx ~ Depression_parent  + age + age_parent + duration_dislocation + PTSD_parent +Anxiety_parent + impulsivity_parent + (1|settlement/ID) ,data=df)
+m17<- lmer(Anx ~ Anxiety_parent  + (1|settlement/ID) ,data=df)
+m18<- lmer(Anx ~ Anxiety_parent  + age_parent + duration_dislocation + (1|settlement/ID) ,data=df)
+m19<- lmer(Anx ~ Anxiety_parent  + age + age_parent + duration_dislocation + Depression_parent + PTSD_parent + impulsivity_parent + (1|settlement/ID) ,data=df)
+m20<- lmer(Anx ~ PTSD_parent  + (1|settlement/ID) ,data=df)
+m21<- lmer(Anx ~ PTSD_parent  + age_parent + duration_dislocation + (1|settlement/ID) ,data=df)
+m22<- lmer(Anx ~ PTSD_parent  + age + age_parent + duration_dislocation + Depression_parent + Anxiety_parent + impulsivity_parent + (1|settlement/ID) ,data=df)
+m23<- lmer(Anx ~ impulsivity_parent  + (1|settlement/ID) ,data=df)
+m24<- lmer(Anx ~ impulsivity_parent  + age_parent + duration_dislocation + (1|settlement/ID) ,data=df)
+m25<- lmer(Anx ~ impulsivity_parent  + age + age_parent + duration_dislocation + Depression_parent + Anxiety_parent + PTSD_parent + (1|settlement/ID) ,data=df)
+
+Anx_res<-rbind(res(m1,"time2"),res(m2,"age"),res(m3,"age"),
+         res(m4,"duration_dislocation"),res(m5,"duration_dislocation"),
+         res(m6,"war_events"),res(m7,"war_events"),
+         res(m8,"environment"),res(m9,"environment"),res(m10,"abuse"),res(m11,"abuse"),
+         res(m12,"conflict_family"),res(m13,"conflict_family"),
+         res(m14,"Depression_parent"), res(m15,"Depression_parent"),res(m16,"Depression_parent"),
+         res(m17,"Anxiety_parent"),res(m18,"Anxiety_parent"),res(m19,"Anxiety_parent"),
+         res(m20,"PTSD_parent"),res(m21,"PTSD_parent"),res(m22,"PTSD_parent"),
+         res(m23,"impulsivity_parent"),res(m24,"impulsivity_parent"),res(m25,"impulsivity_parent"))
+
+colnames(Anx_res)<-c("model","Estimate", "Error", "CI - 2.5%", "CI - 97.5%", "Effect size", "p value")
+Anx_res
+```````````
+
+````{r writeAnxGirls, include=FALSE}
+write.csv(Anx_res, file = "~/Downloads/Anx_girls.csv")
+`````````
+
+#### PTSD symptoms
+```{r PTSDSex, echo=FALSE}
+## Demographic predictors single models and adjusted for putative demographic confounders:
+m1<-  lmer(PTSD ~ time + (1|settlement/ID) ,data=df)
+m2<-  lmer(PTSD ~ age + (1|settlement/ID) ,data=df)
+m3<-  lmer(PTSD ~ age + duration_dislocation + (1|settlement/ID) ,data=df)
+m4<-  lmer(PTSD ~ duration_dislocation + (1|settlement/ID) ,data=df)
+m5<-  lmer(PTSD ~ duration_dislocation + age + (1|settlement/ID) ,data=df)
+
+## War events single model and adjusted for age, sex and duration of displacement
+m6<-  lmer(PTSD ~ war_events  + (1|settlement/ID) ,data=df)
+m7<-  lmer(PTSD ~ war_events + age + duration_dislocation + (1|settlement/ID) ,data=df)
+
+## Refugee Environmental events single model and adjusted for age, sex and duration of displacement. Results for the subscales are presented in a separate file.
+m8<- lmer(PTSD ~ environment  + (1|settlement/ID) ,data=df)
+m9<- lmer(PTSD ~ environment + age + duration_dislocation + (1|settlement/ID) ,data=df)
+
+## Child-reported physical maltreatment single model and adjusted for age, sex and duration of displacement
+m10<- lmer(PTSD ~ abuse  + (1|settlement/ID) ,data=df)
+m11<- lmer(PTSD ~ abuse + age  + duration_dislocation + (1|settlement/ID) ,data=df)
+
+## Child-caregiver conflict single model and adjusted for age, sex and duration of displacement
+m12<- lmer(PTSD ~ conflict_family  + (1|settlement/ID) ,data=df)
+m13<- lmer(PTSD ~ conflict_family + age  + duration_dislocation + (1|settlement/ID) ,data=df)
+
+## Caregiver mental health symptoms single model; adjusted for caregiver age and duration of displacement; and multivariate models to evaluate the unique contribution of each class of symptoms (ajdusted for child age, caregiver age, duration of dislocation and all other caregiver mental health measures):
+m14<- lmer(PTSD ~ Depression_parent  + (1|settlement/ID) ,data=df)
+m15<- lmer(PTSD ~ Depression_parent  + age_parent + duration_dislocation + (1|settlement/ID) ,data=df)
+m16<- lmer(PTSD ~ Depression_parent  + age + age_parent + duration_dislocation + PTSD_parent +Anxiety_parent + impulsivity_parent + (1|settlement/ID) ,data=df)
+m17<- lmer(PTSD ~ Anxiety_parent  + (1|settlement/ID) ,data=df)
+m18<- lmer(PTSD ~ Anxiety_parent  + age_parent + duration_dislocation + (1|settlement/ID) ,data=df)
+m19<- lmer(PTSD ~ Anxiety_parent  + age + age_parent + duration_dislocation + Depression_parent + PTSD_parent + impulsivity_parent + (1|settlement/ID) ,data=df)
+m20<- lmer(PTSD ~ PTSD_parent  + (1|settlement/ID) ,data=df)
+m21<- lmer(PTSD ~ PTSD_parent  + age_parent + duration_dislocation + (1|settlement/ID) ,data=df)
+m22<- lmer(PTSD ~ PTSD_parent  + age + age_parent + duration_dislocation + Depression_parent + Anxiety_parent + impulsivity_parent + (1|settlement/ID) ,data=df)
+m23<- lmer(PTSD ~ impulsivity_parent  + (1|settlement/ID) ,data=df)
+m24<- lmer(PTSD ~ impulsivity_parent  + age_parent + duration_dislocation + (1|settlement/ID) ,data=df)
+m25<- lmer(PTSD ~ impulsivity_parent  + age + age_parent + duration_dislocation + Depression_parent + Anxiety_parent + PTSD_parent + (1|settlement/ID) ,data=df)
+
+PTSD_res<-rbind(res(m1,"time2"),res(m2,"age"),res(m3,"age"),
+         res(m4,"duration_dislocation"),res(m5,"duration_dislocation"),
+         res(m6,"war_events"),res(m7,"war_events"),
+         res(m8,"environment"),res(m9,"environment"),res(m10,"abuse"),res(m11,"abuse"),
+         res(m12,"conflict_family"),res(m13,"conflict_family"),
+         res(m14,"Depression_parent"), res(m15,"Depression_parent"),res(m16,"Depression_parent"),
+         res(m17,"Anxiety_parent"),res(m18,"Anxiety_parent"),res(m19,"Anxiety_parent"),
+         res(m20,"PTSD_parent"),res(m21,"PTSD_parent"),res(m22,"PTSD_parent"),
+         res(m23,"impulsivity_parent"),res(m24,"impulsivity_parent"),res(m25,"impulsivity_parent"))
+
+colnames(PTSD_res)<-c("model","Estimate", "Error", "CI - 2.5%", "CI - 97.5%", "Effect size", "p value")
+PTSD_res
+```````````
+
+````{r writePTSDGirls, include=FALSE}
+write.csv(PTSD_res, file = "~/Downloads/PTSD_girls.csv")
+`````````
+
+#### Externalizing symptoms
+```{r ExtSex, echo=FALSE}
+## Demographic predictors single models and adjusted for putative demographic confounders:
+m1<-  lmer(Ext ~ time + (1|settlement/ID) ,data=df)
+m2<-  lmer(Ext ~ age + (1|settlement/ID) ,data=df)
+m3<-  lmer(Ext ~ age + duration_dislocation + (1|settlement/ID) ,data=df)
+m4<-  lmer(Ext ~ duration_dislocation + (1|settlement/ID) ,data=df)
+m5<-  lmer(Ext ~ duration_dislocation + age + (1|settlement/ID) ,data=df)
+
+## War events single model and adjusted for age, sex and duration of displacement
+m6<-  lmer(Ext ~ war_events  + (1|settlement/ID) ,data=df)
+m7<-  lmer(Ext ~ war_events + age + duration_dislocation + (1|settlement/ID) ,data=df)
+
+## Refugee Environmental events single model and adjusted for age, sex and duration of displacement. Results for the subscales are presented in a separate file.
+m8<- lmer(Ext ~ environment  + (1|settlement/ID) ,data=df)
+m9<- lmer(Ext ~ environment + age + duration_dislocation + (1|settlement/ID) ,data=df)
+
+## Child-reported physical maltreatment single model and adjusted for age, sex and duration of displacement
+m10<- lmer(Ext ~ abuse  + (1|settlement/ID) ,data=df)
+m11<- lmer(Ext ~ abuse + age  + duration_dislocation + (1|settlement/ID) ,data=df)
+
+## Child-caregiver conflict single model and adjusted for age, sex and duration of displacement
+m12<- lmer(Ext ~ conflict_family  + (1|settlement/ID) ,data=df)
+m13<- lmer(Ext ~ conflict_family + age  + duration_dislocation + (1|settlement/ID) ,data=df)
+
+## Caregiver mental health symptoms single model; adjusted for caregiver age and duration of displacement; and multivariate models to evaluate the unique contribution of each class of symptoms (ajdusted for child age, caregiver age, duration of dislocation and all other caregiver mental health measures):
+m14<- lmer(Ext ~ Depression_parent  + (1|settlement/ID) ,data=df)
+m15<- lmer(Ext ~ Depression_parent  + age_parent + duration_dislocation + (1|settlement/ID) ,data=df)
+m16<- lmer(Ext ~ Depression_parent  + age + age_parent + duration_dislocation + PTSD_parent +Anxiety_parent + impulsivity_parent + (1|settlement/ID) ,data=df)
+m17<- lmer(Ext ~ Anxiety_parent  + (1|settlement/ID) ,data=df)
+m18<- lmer(Ext ~ Anxiety_parent  + age_parent + duration_dislocation + (1|settlement/ID) ,data=df)
+m19<- lmer(Ext ~ Anxiety_parent  + age + age_parent + duration_dislocation + Depression_parent + PTSD_parent + impulsivity_parent + (1|settlement/ID) ,data=df)
+m20<- lmer(Ext ~ PTSD_parent  + (1|settlement/ID) ,data=df)
+m21<- lmer(Ext ~ PTSD_parent  + age_parent + duration_dislocation + (1|settlement/ID) ,data=df)
+m22<- lmer(Ext ~ PTSD_parent  + age + age_parent + duration_dislocation + Depression_parent + Anxiety_parent + impulsivity_parent + (1|settlement/ID) ,data=df)
+m23<- lmer(Ext ~ impulsivity_parent  + (1|settlement/ID) ,data=df)
+m24<- lmer(Ext ~ impulsivity_parent  + age_parent + duration_dislocation + (1|settlement/ID) ,data=df)
+m25<- lmer(Ext ~ impulsivity_parent  + age + age_parent + duration_dislocation + Depression_parent + Anxiety_parent + PTSD_parent + (1|settlement/ID) ,data=df)
+
+Ext_res<-rbind(res(m1,"time2"),res(m2,"age"),res(m3,"age"),
+         res(m4,"duration_dislocation"),res(m5,"duration_dislocation"),
+         res(m6,"war_events"),res(m7,"war_events"),
+         res(m8,"environment"),res(m9,"environment"),res(m10,"abuse"),res(m11,"abuse"),
+         res(m12,"conflict_family"),res(m13,"conflict_family"),
+         res(m14,"Depression_parent"), res(m15,"Depression_parent"),res(m16,"Depression_parent"),
+         res(m17,"Anxiety_parent"),res(m18,"Anxiety_parent"),res(m19,"Anxiety_parent"),
+         res(m20,"PTSD_parent"),res(m21,"PTSD_parent"),res(m22,"PTSD_parent"),
+         res(m23,"impulsivity_parent"),res(m24,"impulsivity_parent"),res(m25,"impulsivity_parent"))
+
+colnames(Ext_res)<-c("model","Estimate", "Error", "CI - 2.5%", "CI - 97.5%", "Effect size", "p value")
+Ext_res
+```````````
+
+````{r writeExtGirls, include=FALSE}
+write.csv(Ext_res, file = "~/Downloads/Ext_girls.csv")
+`````````
+
+
+### Male (N=755): 
+``````{r boys, include=FALSE}
+df1<-data %>%
+  select(
+         IDmerge,
+         includey1,includey2,flagall,flagally2,
+         settpcodeINTc,
+         pAgeCalculated,
+         cDem1,
+         AgeCalculated,
+         TimeCatY1,
+         cpWEQtot,
+         cDEPbrief,cDEPbriefy2,cANXbrief,cANXbriefy2,cPTSDtotr,cPTSDtoty2r,pSDQEXTtotc,pSDQEXTtoty2r,
+         cICASTtot,cICASTtoty2,pPREItotr,pPREItoty2r,     
+         pPTSDtotr,pPTSDtoty2r,pCESDtot,pCESDtoty2,pDASS21tot,pDASS21toty2,
+         cPCRctot,cPCRctoty2,pABIStot, pABIStoty2
+       )
+
+df_clean<-df1[which(df1$includey1=="Include" & df1$cDem1=="Male"),]
+
+df_Y1<-df_clean %>%
+  select(IDmerge,
+         settpcodeINTc,
+         pAgeCalculated,
+         cDem1,
+         AgeCalculated,
+         TimeCatY1,
+         cpWEQtot,
+         cDEPbrief,cANXbrief,cPTSDtotr,pSDQEXTtotc,
+         cICASTtot,pPREItotr,
+         pPTSDtotr,pCESDtot,pDASS21tot,
+         cPCRctot, pABIStot
+  )
+df_Y1$time<-rep("1",dim(df_Y1)[[1]])
+colnames(df_Y1)<-c("ID" , "settlement", "age_parent", "sex" , "age" , "duration_dislocation" , "war_events" ,"Dep",    
+"Anx", "PTSD" , "Ext", "abuse" , "environment" , "PTSD_parent", "Depression_parent","Anxiety_parent", "conflict_family", "impulsivity_parent", "time")
+
+df_clean_2<-df1[which(df1$includey2=="Include"),]
+df_Y2<-df_clean_2 %>%
+  select(IDmerge,
+         settpcodeINTc,
+         pAgeCalculated,
+         cDem1,
+         AgeCalculated,
+         TimeCatY1,
+         cpWEQtot,
+         cDEPbriefy2,cANXbriefy2,cPTSDtoty2r,pSDQEXTtoty2r,
+         cICASTtoty2,pPREItoty2r,     
+         pPTSDtoty2r,pCESDtoty2,pDASS21toty2,
+         cPCRctoty2, pABIStoty2
+       )
+df_Y2$time<-rep("2",dim(df_Y2)[[1]])
+colnames(df_Y2)<-colnames(df_Y1)
+
+df<-rbind(df_Y1,df_Y2)
+
+df$ID<-as.factor(df$ID)
+df$time<-as.factor(df$time)
+df$settlement<-as.factor(df$settlement)
+df$duration_dislocation<-revalue(df$duration_dislocation, c("0-6 months ago" = 1, 
+                                   "6-12 months ago" =2,
+                                   "12-18 months ago" = 3,
+                                    "18-24 months ago" = 4,
+                                    "24-36 months ago"= 6,
+                                    "36-48 months ago"= 8,
+                                     ">48 months ago"= 10
+                                                ))
+df$duration_dislocation<-as.numeric(df$duration_dislocation)
+``````````
+
+#### Depressive symptoms
+```{r DepSex, echo=FALSE}
+`````
+
+````{r writeDepBoys, include=FALSE}
+write.csv(Dep_res, file = "~/Downloads/Dep_boys.csv")
+`````````
+
+#### Anxiety symptoms
+```{r AnxSex, echo=FALSE}
+``````
+
+````{r writeAnxBoys, include=FALSE}
+write.csv(Anx_res, file = "~/Downloads/Anx_boys.csv")
+`````````
+
+#### PTSD symptoms
+```{r PTSDSex, echo=FALSE}
+``````
+
+````{r writePTSDBoys, include=FALSE}
+write.csv(PTSD_res, file = "~/Downloads/PTSD_boys.csv")
+`````````
+
+#### Externalizing symptoms
+```{r ExtSex, echo=FALSE}
+``````
+
+````{r writeExtBoys, include=FALSE}
+write.csv(Ext_res, file = "~/Downloads/Ext_boys.csv")
+`````````
+
+## Sensitivity analysis : subgroups by age
+
+### Younger(<=10 years old; N=634)
+``````{r younger, include=FALSE}
+df1<-data %>%
+  select(
+         IDmerge,
+         includey1,includey2,flagall,flagally2,
+         settpcodeINTc,
+         pAgeCalculated,
+         cDem1,
+         AgeCalculated,
+         TimeCatY1,
+         cpWEQtot,
+         cDEPbrief,cDEPbriefy2,cANXbrief,cANXbriefy2,cPTSDtotr,cPTSDtoty2r,pSDQEXTtotc,pSDQEXTtoty2r,
+         cICASTtot,cICASTtoty2,pPREItotr,pPREItoty2r,     
+         pPTSDtotr,pPTSDtoty2r,pCESDtot,pCESDtoty2,pDASS21tot,pDASS21toty2,
+         cPCRctot,cPCRctoty2,pABIStot, pABIStoty2
+       )
+
+df_clean<-df1[which(df1$includey1=="Include" & df1$AgeCalculated<=10.5),]
+
+df_Y1<-df_clean %>%
+  select(IDmerge,
+         settpcodeINTc,
+         pAgeCalculated,
+         cDem1,
+         AgeCalculated,
+         TimeCatY1,
+         cpWEQtot,
+         cDEPbrief,cANXbrief,cPTSDtotr,pSDQEXTtotc,
+         cICASTtot,pPREItotr,
+         pPTSDtotr,pCESDtot,pDASS21tot,
+         cPCRctot, pABIStot
+  )
+df_Y1$time<-rep("1",dim(df_Y1)[[1]])
+colnames(df_Y1)<-c("ID" , "settlement", "age_parent", "sex" , "age" , "duration_dislocation" , "war_events" ,"Dep",    
+"Anx", "PTSD" , "Ext", "abuse" , "environment" , "PTSD_parent", "Depression_parent","Anxiety_parent", "conflict_family", "impulsivity_parent", "time")
+
+df_clean_2<-df1[which(df1$includey2=="Include"),]
+df_Y2<-df_clean_2 %>%
+  select(IDmerge,
+         settpcodeINTc,
+         pAgeCalculated,
+         cDem1,
+         AgeCalculated,
+         TimeCatY1,
+         cpWEQtot,
+         cDEPbriefy2,cANXbriefy2,cPTSDtoty2r,pSDQEXTtoty2r,
+         cICASTtoty2,pPREItoty2r,     
+         pPTSDtoty2r,pCESDtoty2,pDASS21toty2,
+         cPCRctoty2, pABIStoty2
+       )
+df_Y2$time<-rep("2",dim(df_Y2)[[1]])
+colnames(df_Y2)<-colnames(df_Y1)
+
+df<-rbind(df_Y1,df_Y2)
+
+df$ID<-as.factor(df$ID)
+df$time<-as.factor(df$time)
+df$settlement<-as.factor(df$settlement)
+df$duration_dislocation<-revalue(df$duration_dislocation, c("0-6 months ago" = 1, 
+                                   "6-12 months ago" =2,
+                                   "12-18 months ago" = 3,
+                                    "18-24 months ago" = 4,
+                                    "24-36 months ago"= 6,
+                                    "36-48 months ago"= 8,
+                                     ">48 months ago"= 10
+                                                ))
+df$duration_dislocation<-as.numeric(df$duration_dislocation)
+``````````
+#### Depressive symptoms:
+``````{r Depression, echo=FALSE}
+```````
+
+````{r writeDepyoung, include=FALSE}
+write.csv(Dep_res, file = "~/Downloads/Dep_younger.csv")
+``````
+#### Anxiety symptoms: 
+`````{r Anxiety, echo=FALSE}
+````````
+
+````{r writeAnxyoung, include=FALSE}
+write.csv(Anx_res, file = "~/Downloads/Anx_younger.csv")
+```````
+#### PTSD symptoms:
+``````{r PTSD, echo=FALSE}
+`````````
+
+````{r writePTSDyoung, include=FALSE}
+write.csv(PTSD_res, file = "~/Downloads/PTSD_younger.csv")
+````````````
+#### Externalizing symptoms;
+``````{r Externalizing, echo=FALSE}
+````````
+
+````{r writeExtyoung, include=FALSE}
+write.csv(Ext_res, file = "~/Downloads/Ext_younger.csv")
+`````````
+
+
+### Older(Age calculated >10.5 years old; N=948)
+``````{r older, include=FALSE}
+df1<-data %>%
+  select(
+         IDmerge,
+         includey1,includey2,flagall,flagally2,
+         settpcodeINTc,
+         pAgeCalculated,
+         cDem1,
+         AgeCalculated,
+         TimeCatY1,
+         cpWEQtot,
+         cDEPbrief,cDEPbriefy2,cANXbrief,cANXbriefy2,cPTSDtotr,cPTSDtoty2r,pSDQEXTtotc,pSDQEXTtoty2r,
+         cICASTtot,cICASTtoty2,pPREItotr,pPREItoty2r,     
+         pPTSDtotr,pPTSDtoty2r,pCESDtot,pCESDtoty2,pDASS21tot,pDASS21toty2,
+         cPCRctot,cPCRctoty2,pABIStot, pABIStoty2
+       )
+
+df_clean<-df1[which(df1$includey1=="Include" & df1$AgeCalculated > 10.5),]
+
+df_Y1<-df_clean %>%
+  select(IDmerge,
+         settpcodeINTc,
+         pAgeCalculated,
+         cDem1,
+         AgeCalculated,
+         TimeCatY1,
+         cpWEQtot,
+         cDEPbrief,cANXbrief,cPTSDtotr,pSDQEXTtotc,
+         cICASTtot,pPREItotr,
+         pPTSDtotr,pCESDtot,pDASS21tot,
+         cPCRctot, pABIStot
+  )
+df_Y1$time<-rep("1",dim(df_Y1)[[1]])
+colnames(df_Y1)<-c("ID" , "settlement", "age_parent", "sex" , "age" , "duration_dislocation" , "war_events" ,"Dep",    
+"Anx", "PTSD" , "Ext", "abuse" , "environment" , "PTSD_parent", "Depression_parent","Anxiety_parent", "conflict_family", "impulsivity_parent", "time")
+
+df_clean_2<-df1[which(df1$includey2=="Include"),]
+df_Y2<-df_clean_2 %>%
+  select(IDmerge,
+         settpcodeINTc,
+         pAgeCalculated,
+         cDem1,
+         AgeCalculated,
+         TimeCatY1,
+         cpWEQtot,
+         cDEPbriefy2,cANXbriefy2,cPTSDtoty2r,pSDQEXTtoty2r,
+         cICASTtoty2,pPREItoty2r,     
+         pPTSDtoty2r,pCESDtoty2,pDASS21toty2,
+         cPCRctoty2, pABIStoty2
+       )
+df_Y2$time<-rep("2",dim(df_Y2)[[1]])
+colnames(df_Y2)<-colnames(df_Y1)
+
+df<-rbind(df_Y1,df_Y2)
+
+df$ID<-as.factor(df$ID)
+df$time<-as.factor(df$time)
+df$settlement<-as.factor(df$settlement)
+df$duration_dislocation<-revalue(df$duration_dislocation, c("0-6 months ago" = 1, 
+                                   "6-12 months ago" =2,
+                                   "12-18 months ago" = 3,
+                                    "18-24 months ago" = 4,
+                                    "24-36 months ago"= 6,
+                                    "36-48 months ago"= 8,
+                                     ">48 months ago"= 10
+                                                ))
+df$duration_dislocation<-as.numeric(df$duration_dislocation)
+``````````
+#### Depressive symptoms:
+``````{r Depression, echo=FALSE}
+```````
+
+````{r writeDepold, include=FALSE}
+write.csv(Dep_res, file = "~/Downloads/Dep_older.csv")
+``````
+#### Anxiety symptoms: 
+`````{r Anxiety, echo=FALSE}
+````````
+
+````{r writeAnxold, include=FALSE}
+write.csv(Anx_res, file = "~/Downloads/Anx_older.csv")
+```````
+#### PTSD symptoms:
+``````{r PTSD, echo=FALSE}
+`````````
+
+````{r writePTSDold, include=FALSE}
+write.csv(PTSD_res, file = "~/Downloads/PTSD_older.csv")
+````````````
+#### Externalizing symptoms;
+``````{r Externalizing, echo=FALSE}
+````````
+
+````{r writeExtold, include=FALSE}
+write.csv(Ext_res, file = "~/Downloads/Ext_older.csv")
+`````````
+
+## Sensitivity analysis : subgroups by duration of dislocation
+
+### Recent  (N=524)
+``````{r recent_displace, include=FALSE}
+df1<-data %>%
+  select(
+         IDmerge,
+         includey1,includey2,flagall,flagally2,
+         settpcodeINTc,
+         pAgeCalculated,
+         cDem1,
+         AgeCalculated,
+         TimeCatY1,
+         cpWEQtot,
+         cDEPbrief,cDEPbriefy2,cANXbrief,cANXbriefy2,cPTSDtotr,cPTSDtoty2r,pSDQEXTtotc,pSDQEXTtoty2r,
+         cICASTtot,cICASTtoty2,pPREItotr,pPREItoty2r,     
+         pPTSDtotr,pPTSDtoty2r,pCESDtot,pCESDtoty2,pDASS21tot,pDASS21toty2,
+         cPCRctot,cPCRctoty2,pABIStot, pABIStoty2
+       )
+df1$TimeCatY1<-revalue(df1$TimeCatY1, c("0-6 months ago" = 1.0, 
+                                   "6-12 months ago" =2.0,
+                                   "12-18 months ago" = 3.0,
+                                    "18-24 months ago" = 4.0,
+                                    "24-36 months ago"= 6.0,
+                                    "36-48 months ago"= 8.0,
+                                     ">48 months ago"= 10.0
+                                                ))
+df1$TimeCatY1<-as.numeric(df1$TimeCatY1)
+df_clean<-df1[which(df1$includey1=="Include" & df1$TimeCatY1 <= 4.0),]
+
+df_Y1<-df_clean %>%
+  select(IDmerge,
+         settpcodeINTc,
+         pAgeCalculated,
+         cDem1,
+         AgeCalculated,
+         TimeCatY1,
+         cpWEQtot,
+         cDEPbrief,cANXbrief,cPTSDtotr,pSDQEXTtotc,
+         cICASTtot,pPREItotr,
+         pPTSDtotr,pCESDtot,pDASS21tot,
+         cPCRctot, pABIStot
+  )
+df_Y1$time<-rep("1",dim(df_Y1)[[1]])
+colnames(df_Y1)<-c("ID" , "settlement", "age_parent", "sex" , "age" , "duration_dislocation" , "war_events" ,"Dep",    
+"Anx", "PTSD" , "Ext", "abuse" , "environment" , "PTSD_parent", "Depression_parent","Anxiety_parent", "conflict_family", "impulsivity_parent", "time")
+
+df_clean_2<-df1[which(df1$includey2=="Include"),]
+df_Y2<-df_clean_2 %>%
+  select(IDmerge,
+         settpcodeINTc,
+         pAgeCalculated,
+         cDem1,
+         AgeCalculated,
+         TimeCatY1,
+         cpWEQtot,
+         cDEPbriefy2,cANXbriefy2,cPTSDtoty2r,pSDQEXTtoty2r,
+         cICASTtoty2,pPREItoty2r,     
+         pPTSDtoty2r,pCESDtoty2,pDASS21toty2,
+         cPCRctoty2, pABIStoty2
+       )
+df_Y2$time<-rep("2",dim(df_Y2)[[1]])
+colnames(df_Y2)<-colnames(df_Y1)
+
+df<-rbind(df_Y1,df_Y2)
+
+df$ID<-as.factor(df$ID)
+df$time<-as.factor(df$time)
+df$settlement<-as.factor(df$settlement)
+``````````
+
+
+#### Depressive symptoms
+``````{r Depression_dislocation, echo=FALSE}
+
+## Demographic predictors single models and adjusted for putative demographic confounders:
+m1<-  lmer(Dep ~ time + (1|settlement/ID) ,data=df)
+m2<-  lmer(Dep ~ age + (1|settlement/ID) ,data=df)
+m3<-  lmer(Dep ~ age + sex  + (1|settlement/ID) ,data=df)
+m4<-  lmer(Dep ~ sex + (1|settlement/ID) ,data=df)
+m5<-  lmer(Dep ~ sex + age +  (1|settlement/ID) ,data=df)
+
+## War events single model and adjusted for age, sex and duration of displacement
+m8<-  lmer(Dep ~ war_events  + (1|settlement/ID) ,data=df)
+m9<-  lmer(Dep ~ war_events + age + sex  + (1|settlement/ID) ,data=df)
+
+## Refugee Environmental events single model and adjusted for age, sex and duration of displacement. Results for the subscales are presented in a separate file.
+m10<- lmer(Dep ~ environment  + (1|settlement/ID) ,data=df)
+m11<- lmer(Dep ~ environment + age + sex + (1|settlement/ID) ,data=df)
+
+## Child-reported physical maltreatment single model and adjusted for age, sex and duration of displacement
+m12<- lmer(Dep ~ abuse  + (1|settlement/ID) ,data=df)
+m13<- lmer(Dep ~ abuse + age + sex  + (1|settlement/ID) ,data=df)
+
+## Child-caregiver conflict single model and adjusted for age, sex and duration of displacement
+m14<- lmer(Dep ~ conflict_family  + (1|settlement/ID) ,data=df)
+m15<- lmer(Dep ~ conflict_family + age + sex  + (1|settlement/ID) ,data=df)
+
+## Caregiver mental health symptoms single model; adjusted for caregiver age and duration of displacement; and multivariate models to evaluate the unique contribution of each class of symptoms (ajdusted for child age, caregiver age, duration of dislocation and all other caregiver mental health measures):
+m16<- lmer(Dep ~ Depression_parent  + (1|settlement/ID) ,data=df)
+m17<- lmer(Dep ~ Depression_parent  + age_parent  + (1|settlement/ID) ,data=df)
+m18<- lmer(Dep ~ Depression_parent  + age + age_parent  + PTSD_parent +Anxiety_parent + impulsivity_parent + (1|settlement/ID) ,data=df)
+m19<- lmer(Dep ~ Anxiety_parent  + (1|settlement/ID) ,data=df)
+m20<- lmer(Dep ~ Anxiety_parent  + age_parent  + (1|settlement/ID) ,data=df)
+m21<- lmer(Dep ~ Anxiety_parent  + age + age_parent  + Depression_parent + PTSD_parent + impulsivity_parent + (1|settlement/ID) ,data=df)
+m22<- lmer(Dep ~ PTSD_parent  + (1|settlement/ID) ,data=df)
+m23<- lmer(Dep ~ PTSD_parent  + age_parent  + (1|settlement/ID) ,data=df)
+m24<- lmer(Dep ~ PTSD_parent  + age + age_parent  + Depression_parent + Anxiety_parent + impulsivity_parent + (1|settlement/ID) ,data=df)
+m25<- lmer(Dep ~ impulsivity_parent  + (1|settlement/ID) ,data=df)
+m26<- lmer(Dep ~ impulsivity_parent  + age_parent + (1|settlement/ID) ,data=df)
+m27<- lmer(Dep ~ impulsivity_parent  + age + age_parent + Depression_parent + Anxiety_parent + PTSD_parent + (1|settlement/ID) ,data=df)
+
+Dep_res<-rbind(res(m1,"time2"),res(m2,"age"),res(m3,"age"),
+         res(m4,"sexFemale"),res(m5,"sexFemale"),
+         res(m8,"war_events"),res(m9,"war_events"),
+         res(m10,"environment"),res(m11,"environment"),res(m12,"abuse"),res(m13,"abuse"),
+         res(m14,"conflict_family"),res(m15,"conflict_family"),
+         res(m16,"Depression_parent"), res(m17,"Depression_parent"),res(m18,"Depression_parent"),
+         res(m19,"Anxiety_parent"),res(m20,"Anxiety_parent"),res(m21,"Anxiety_parent"),
+         res(m22,"PTSD_parent"),res(m23,"PTSD_parent"),res(m24,"PTSD_parent"),
+         res(m25,"impulsivity_parent"),res(m26,"impulsivity_parent"),res(m27,"impulsivity_parent"))
+
+colnames(Dep_res)<-c("model","Estimate", "Error", "CI - 2.5%", "CI - 97.5%", "Effect size", "p value")
+Dep_res
+```````````
+
+````{r writeDeprec, include=FALSE}
+write.csv(Dep_res, file = "~/Downloads/Dep_recent.csv")
+`````````
+#### Anxiety symptoms
+
+``````{r Anx_dislocation, echo=FALSE}
+
+## Demographic predictors single models and adjusted for putative demographic confounders:
+m1<-  lmer(Anx ~ time + (1|settlement/ID) ,data=df)
+m2<-  lmer(Anx ~ age + (1|settlement/ID) ,data=df)
+m3<-  lmer(Anx ~ age + sex  + (1|settlement/ID) ,data=df)
+m4<-  lmer(Anx ~ sex + (1|settlement/ID) ,data=df)
+m5<-  lmer(Anx ~ sex + age +  (1|settlement/ID) ,data=df)
+
+## War events single model and adjusted for age, sex and duration of displacement
+m8<-  lmer(Anx ~ war_events  + (1|settlement/ID) ,data=df)
+m9<-  lmer(Anx ~ war_events + age + sex  + (1|settlement/ID) ,data=df)
+
+## Refugee Environmental events single model and adjusted for age, sex and duration of displacement. Results for the subscales are presented in a separate file.
+m10<- lmer(Anx ~ environment  + (1|settlement/ID) ,data=df)
+m11<- lmer(Anx ~ environment + age + sex + (1|settlement/ID) ,data=df)
+
+## Child-reported physical maltreatment single model and adjusted for age, sex and duration of displacement
+m12<- lmer(Anx ~ abuse  + (1|settlement/ID) ,data=df)
+m13<- lmer(Anx ~ abuse + age + sex  + (1|settlement/ID) ,data=df)
+
+## Child-caregiver conflict single model and adjusted for age, sex and duration of displacement
+m14<- lmer(Anx ~ conflict_family  + (1|settlement/ID) ,data=df)
+m15<- lmer(Anx ~ conflict_family + age + sex  + (1|settlement/ID) ,data=df)
+
+## Caregiver mental health symptoms single model; adjusted for caregiver age and duration of displacement; and multivariate models to evaluate the unique contribution of each class of symptoms (ajdusted for child age, caregiver age, duration of dislocation and all other caregiver mental health measures):
+m16<- lmer(Anx ~ Depression_parent  + (1|settlement/ID) ,data=df)
+m17<- lmer(Anx ~ Depression_parent  + age_parent  + (1|settlement/ID) ,data=df)
+m18<- lmer(Anx ~ Depression_parent  + age + age_parent  + PTSD_parent +Anxiety_parent + impulsivity_parent + (1|settlement/ID) ,data=df)
+m19<- lmer(Anx ~ Anxiety_parent  + (1|settlement/ID) ,data=df)
+m20<- lmer(Anx ~ Anxiety_parent  + age_parent  + (1|settlement/ID) ,data=df)
+m21<- lmer(Anx ~ Anxiety_parent  + age + age_parent  + Depression_parent + PTSD_parent + impulsivity_parent + (1|settlement/ID) ,data=df)
+m22<- lmer(Anx ~ PTSD_parent  + (1|settlement/ID) ,data=df)
+m23<- lmer(Anx ~ PTSD_parent  + age_parent  + (1|settlement/ID) ,data=df)
+m24<- lmer(Anx ~ PTSD_parent  + age + age_parent  + Depression_parent + Anxiety_parent + impulsivity_parent + (1|settlement/ID) ,data=df)
+m25<- lmer(Anx ~ impulsivity_parent  + (1|settlement/ID) ,data=df)
+m26<- lmer(Anx ~ impulsivity_parent  + age_parent + (1|settlement/ID) ,data=df)
+m27<- lmer(Anx ~ impulsivity_parent  + age + age_parent + Depression_parent + Anxiety_parent + PTSD_parent + (1|settlement/ID) ,data=df)
+
+Anx_res<-rbind(res(m1,"time2"),res(m2,"age"),res(m3,"age"),
+         res(m4,"sexFemale"),res(m5,"sexFemale"),
+         res(m8,"war_events"),res(m9,"war_events"),
+         res(m10,"environment"),res(m11,"environment"),res(m12,"abuse"),res(m13,"abuse"),
+         res(m14,"conflict_family"),res(m15,"conflict_family"),
+         res(m16,"Depression_parent"), res(m17,"Depression_parent"),res(m18,"Depression_parent"),
+         res(m19,"Anxiety_parent"),res(m20,"Anxiety_parent"),res(m21,"Anxiety_parent"),
+         res(m22,"PTSD_parent"),res(m23,"PTSD_parent"),res(m24,"PTSD_parent"),
+         res(m25,"impulsivity_parent"),res(m26,"impulsivity_parent"),res(m27,"impulsivity_parent"))
+
+colnames(Anx_res)<-c("model","Estimate", "Error", "CI - 2.5%", "CI - 97.5%", "Effect size", "p value")
+Anx_res
+```````````
+
+````{r writeAnxrec, include=FALSE}
+write.csv(Anx_res, file = "~/Downloads/Anx_recent.csv")
+`````````
+#### PTSD symptoms
+``````{r PTSD_dislocation, echo=FALSE}
+
+## Demographic predictors single models and adjusted for putative demographic confounders:
+m1<-  lmer(PTSD ~ time + (1|settlement/ID) ,data=df)
+m2<-  lmer(PTSD ~ age + (1|settlement/ID) ,data=df)
+m3<-  lmer(PTSD ~ age + sex  + (1|settlement/ID) ,data=df)
+m4<-  lmer(PTSD ~ sex + (1|settlement/ID) ,data=df)
+m5<-  lmer(PTSD ~ sex + age +  (1|settlement/ID) ,data=df)
+
+## War events single model and adjusted for age, sex and duration of displacement
+m8<-  lmer(PTSD ~ war_events  + (1|settlement/ID) ,data=df)
+m9<-  lmer(PTSD ~ war_events + age + sex  + (1|settlement/ID) ,data=df)
+
+## Refugee Environmental events single model and adjusted for age, sex and duration of displacement. Results for the subscales are presented in a separate file.
+m10<- lmer(PTSD ~ environment  + (1|settlement/ID) ,data=df)
+m11<- lmer(PTSD ~ environment + age + sex + (1|settlement/ID) ,data=df)
+
+## Child-reported physical maltreatment single model and adjusted for age, sex and duration of displacement
+m12<- lmer(PTSD ~ abuse  + (1|settlement/ID) ,data=df)
+m13<- lmer(PTSD ~ abuse + age + sex  + (1|settlement/ID) ,data=df)
+
+## Child-caregiver conflict single model and adjusted for age, sex and duration of displacement
+m14<- lmer(PTSD ~ conflict_family  + (1|settlement/ID) ,data=df)
+m15<- lmer(PTSD ~ conflict_family + age + sex  + (1|settlement/ID) ,data=df)
+
+## Caregiver mental health symptoms single model; adjusted for caregiver age and duration of displacement; and multivariate models to evaluate the unique contribution of each class of symptoms (ajdusted for child age, caregiver age, duration of dislocation and all other caregiver mental health measures):
+m16<- lmer(PTSD ~ Depression_parent  + (1|settlement/ID) ,data=df)
+m17<- lmer(PTSD ~ Depression_parent  + age_parent  + (1|settlement/ID) ,data=df)
+m18<- lmer(PTSD ~ Depression_parent  + age + age_parent  + PTSD_parent +Anxiety_parent + impulsivity_parent + (1|settlement/ID) ,data=df)
+m19<- lmer(PTSD ~ Anxiety_parent  + (1|settlement/ID) ,data=df)
+m20<- lmer(PTSD ~ Anxiety_parent  + age_parent  + (1|settlement/ID) ,data=df)
+m21<- lmer(PTSD ~ Anxiety_parent  + age + age_parent  + Depression_parent + PTSD_parent + impulsivity_parent + (1|settlement/ID) ,data=df)
+m22<- lmer(PTSD ~ PTSD_parent  + (1|settlement/ID) ,data=df)
+m23<- lmer(PTSD ~ PTSD_parent  + age_parent  + (1|settlement/ID) ,data=df)
+m24<- lmer(PTSD ~ PTSD_parent  + age + age_parent  + Depression_parent + Anxiety_parent + impulsivity_parent + (1|settlement/ID) ,data=df)
+m25<- lmer(PTSD ~ impulsivity_parent  + (1|settlement/ID) ,data=df)
+m26<- lmer(PTSD ~ impulsivity_parent  + age_parent + (1|settlement/ID) ,data=df)
+m27<- lmer(PTSD ~ impulsivity_parent  + age + age_parent + Depression_parent + Anxiety_parent + PTSD_parent + (1|settlement/ID) ,data=df)
+
+PTSD_res<-rbind(res(m1,"time2"),res(m2,"age"),res(m3,"age"),
+         res(m4,"sexFemale"),res(m5,"sexFemale"),
+         res(m8,"war_events"),res(m9,"war_events"),
+         res(m10,"environment"),res(m11,"environment"),res(m12,"abuse"),res(m13,"abuse"),
+         res(m14,"conflict_family"),res(m15,"conflict_family"),
+         res(m16,"Depression_parent"), res(m17,"Depression_parent"),res(m18,"Depression_parent"),
+         res(m19,"Anxiety_parent"),res(m20,"Anxiety_parent"),res(m21,"Anxiety_parent"),
+         res(m22,"PTSD_parent"),res(m23,"PTSD_parent"),res(m24,"PTSD_parent"),
+         res(m25,"impulsivity_parent"),res(m26,"impulsivity_parent"),res(m27,"impulsivity_parent"))
+
+colnames(PTSD_res)<-c("model","Estimate", "Error", "CI - 2.5%", "CI - 97.5%", "Effect size", "p value")
+PTSD_res
+```````````
+
+````{r writePTSDrec, include=FALSE}
+write.csv(PTSD_res, file = "~/Downloads/PTSD_recent.csv")
+`````````
+
+
+#### CD/ODD symptoms
+``````{r Ext_dislocation, echo=FALSE}
+
+## Demographic predictors single models and adjusted for putative demographic confounders:
+m1<-  lmer(Ext ~ time + (1|settlement/ID) ,data=df)
+m2<-  lmer(Ext ~ age + (1|settlement/ID) ,data=df)
+m3<-  lmer(Ext ~ age + sex  + (1|settlement/ID) ,data=df)
+m4<-  lmer(Ext ~ sex + (1|settlement/ID) ,data=df)
+m5<-  lmer(Ext ~ sex + age +  (1|settlement/ID) ,data=df)
+
+## War events single model and adjusted for age, sex and duration of displacement
+m8<-  lmer(Ext ~ war_events  + (1|settlement/ID) ,data=df)
+m9<-  lmer(Ext ~ war_events + age + sex  + (1|settlement/ID) ,data=df)
+
+## Refugee Environmental events single model and adjusted for age, sex and duration of displacement. Results for the subscales are presented in a separate file.
+m10<- lmer(Ext ~ environment  + (1|settlement/ID) ,data=df)
+m11<- lmer(Ext ~ environment + age + sex + (1|settlement/ID) ,data=df)
+
+## Child-reported physical maltreatment single model and adjusted for age, sex and duration of displacement
+m12<- lmer(Ext ~ abuse  + (1|settlement/ID) ,data=df)
+m13<- lmer(Ext ~ abuse + age + sex  + (1|settlement/ID) ,data=df)
+
+## Child-caregiver conflict single model and adjusted for age, sex and duration of displacement
+m14<- lmer(Ext ~ conflict_family  + (1|settlement/ID) ,data=df)
+m15<- lmer(Ext ~ conflict_family + age + sex  + (1|settlement/ID) ,data=df)
+
+## Caregiver mental health symptoms single model; adjusted for caregiver age and duration of displacement; and multivariate models to evaluate the unique contribution of each class of symptoms (ajdusted for child age, caregiver age, duration of dislocation and all other caregiver mental health measures):
+m16<- lmer(Ext ~ Depression_parent  + (1|settlement/ID) ,data=df)
+m17<- lmer(Ext ~ Depression_parent  + age_parent  + (1|settlement/ID) ,data=df)
+m18<- lmer(Ext ~ Depression_parent  + age + age_parent  + PTSD_parent +Anxiety_parent + impulsivity_parent + (1|settlement/ID) ,data=df)
+m19<- lmer(Ext ~ Anxiety_parent  + (1|settlement/ID) ,data=df)
+m20<- lmer(Ext ~ Anxiety_parent  + age_parent  + (1|settlement/ID) ,data=df)
+m21<- lmer(Ext ~ Anxiety_parent  + age + age_parent  + Depression_parent + PTSD_parent + impulsivity_parent + (1|settlement/ID) ,data=df)
+m22<- lmer(Ext ~ PTSD_parent  + (1|settlement/ID) ,data=df)
+m23<- lmer(Ext ~ PTSD_parent  + age_parent  + (1|settlement/ID) ,data=df)
+m24<- lmer(Ext ~ PTSD_parent  + age + age_parent  + Depression_parent + Anxiety_parent + impulsivity_parent + (1|settlement/ID) ,data=df)
+m25<- lmer(Ext ~ impulsivity_parent  + (1|settlement/ID) ,data=df)
+m26<- lmer(Ext ~ impulsivity_parent  + age_parent + (1|settlement/ID) ,data=df)
+m27<- lmer(Ext ~ impulsivity_parent  + age + age_parent + Depression_parent + Anxiety_parent + PTSD_parent + (1|settlement/ID) ,data=df)
+
+Ext_res<-rbind(res(m1,"time2"),res(m2,"age"),res(m3,"age"),
+         res(m4,"sexFemale"),res(m5,"sexFemale"),
+         res(m8,"war_events"),res(m9,"war_events"),
+         res(m10,"environment"),res(m11,"environment"),res(m12,"abuse"),res(m13,"abuse"),
+         res(m14,"conflict_family"),res(m15,"conflict_family"),
+         res(m16,"Depression_parent"), res(m17,"Depression_parent"),res(m18,"Depression_parent"),
+         res(m19,"Anxiety_parent"),res(m20,"Anxiety_parent"),res(m21,"Anxiety_parent"),
+         res(m22,"PTSD_parent"),res(m23,"PTSD_parent"),res(m24,"PTSD_parent"),
+         res(m25,"impulsivity_parent"),res(m26,"impulsivity_parent"),res(m27,"impulsivity_parent"))
+
+colnames(Ext_res)<-c("model","Estimate", "Error", "CI - 2.5%", "CI - 97.5%", "Effect size", "p value")
+Ext_res
+```````````
+
+````{r writeExtrec, include=FALSE}
+write.csv(Ext_res, file = "~/Downloads/Ext_recent.csv")
+`````````
+
+### Prolonged
+``````{r protacted_displace, include=FALSE}
+df1<-data %>%
+  select(
+         IDmerge,
+         includey1,includey2,flagall,flagally2,
+         settpcodeINTc,
+         pAgeCalculated,
+         cDem1,
+         AgeCalculated,
+         TimeCatY1,
+         cpWEQtot,
+         cDEPbrief,cDEPbriefy2,cANXbrief,cANXbriefy2,cPTSDtotr,cPTSDtoty2r,pSDQEXTtotc,pSDQEXTtoty2r,
+         cICASTtot, cICASTtoty2,pPREItotr,pPREItoty2r,     
+         pPTSDtotr,pPTSDtoty2r,pCESDtot,pCESDtoty2,pDASS21tot,pDASS21toty2,
+         cPCRctot,cPCRctoty2,pABIStot, pABIStoty2
+       )
+df1$TimeCatY1<-revalue(df1$TimeCatY1, c("0-6 months ago" = 1.0, 
+                                   "6-12 months ago" =2.0,
+                                   "12-18 months ago" = 3.0,
+                                    "18-24 months ago" = 4.0,
+                                    "24-36 months ago"= 6.0,
+                                    "36-48 months ago"= 8.0,
+                                     ">48 months ago"= 10.0
+                                                ))
+df1$TimeCatY1<-as.numeric(df1$TimeCatY1)
+df_clean<-df1[which(df1$includey1=="Include" & df1$TimeCatY1 > 4.0),]
+
+df_Y1<-df_clean %>%
+  select(IDmerge,
+         settpcodeINTc,
+         pAgeCalculated,
+         cDem1,
+         AgeCalculated,
+         TimeCatY1,
+         cpWEQtot,
+         cDEPbrief,cANXbrief,cPTSDtotr,pSDQEXTtotc,
+         cICASTtot,pPREItotr,
+         pPTSDtotr,pCESDtot,pDASS21tot,
+         cPCRctot, pABIStot
+  )
+df_Y1$time<-rep("1",dim(df_Y1)[[1]])
+colnames(df_Y1)<-c("ID" , "settlement", "age_parent", "sex" , "age" , "duration_dislocation" , "war_events" ,"Dep",    
+"Anx", "PTSD" , "Ext", "abuse" , "environment" , "PTSD_parent", "Depression_parent","Anxiety_parent", "conflict_family", "impulsivity_parent", "time")
+
+df_clean_2<-df1[which(df1$includey2=="Include"),]
+df_Y2<-df_clean_2 %>%
+  select(IDmerge,
+         settpcodeINTc,
+         pAgeCalculated,
+         cDem1,
+         AgeCalculated,
+         TimeCatY1,
+         cpWEQtot,
+         cDEPbriefy2,cANXbriefy2,cPTSDtoty2r,pSDQEXTtoty2r,
+         cICASTtoty2,pPREItoty2r,     
+         pPTSDtoty2r,pCESDtoty2,pDASS21toty2,
+         cPCRctoty2, pABIStoty2
+       )
+df_Y2$time<-rep("2",dim(df_Y2)[[1]])
+colnames(df_Y2)<-colnames(df_Y1)
+
+df<-rbind(df_Y1,df_Y2)
+
+df$ID<-as.factor(df$ID)
+df$time<-as.factor(df$time)
+df$settlement<-as.factor(df$settlement)
+``````````
+
+#### Depressive symptoms
+``````{r Depression_dislocation, echo=FALSE}
+``````
+
+````{r writeDepprot, include=FALSE}
+write.csv(Dep_res, file = "~/Downloads/Dep_protacted.csv")
+`````````
+#### Anxiety symptoms
+``````{r Anx_dislocation, echo=FALSE}
+```````
+
+````{r writeAnxprot, include=FALSE}
+write.csv(Anx_res, file = "~/Downloads/Anx_protacted.csv")
+`````````
+
+#### PTSD symptoms
+``````{r PTSD_dislocation, echo=FALSE}
+```````
+
+````{r writePTSDprot, include=FALSE}
+write.csv(PTSD_res, file = "~/Downloads/PTSD_protacted.csv")
+`````````
+#### CD/ODD symptoms
+
+``````{r Ext_dislocation, echo=FALSE}
+```````
+
+````{r writeExtprot, include=FALSE}
+write.csv(Ext_res, file = "~/Downloads/Ext_protacted.csv")
+`````````
+
+
